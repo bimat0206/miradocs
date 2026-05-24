@@ -1,0 +1,52 @@
+app:
+  name: "MiraDocs"
+  data_dir: "data"
+  db_path: "data/registry.db"
+
+parsing:
+  primary_parser: "docling"
+  fallback_parser: "pymupdf"
+  page_image_dpi: 150
+  ocr_enabled: true
+
+embedding:
+  provider: "ollama"
+  model: "bge-m3"
+  dimensions: 1024
+  ollama_url: "http://localhost:11434"
+
+indexing:
+  default_store: "qdrant"
+  qdrant_path: "data/indexes/qdrant"
+  collection_name: "architecture_docs"
+
+chunking:
+  max_chunk_tokens: 512
+  overlap_tokens: 50
+
+quality:
+  low_text_threshold: 50
+  min_pages_for_ready: 1
+
+entity_extraction:
+  use_llm: true
+  ollama_model: "llama3.2"
+
+search:
+  dense_weight: 0.7
+  sparse_weight: 0.3
+  rerank_enabled: true
+  rerank_model: "llama3.2"
+  default_top_k: 10
+  rerank_top_k: 5
+
+mcp:
+  server_name: "miradocs"
+  transport: "stdio"
+  max_top_k: 20
+
+retrieval:
+  default_search_mode: "auto"
+  default_top_k: 8
+  fallback_to_keyword: true
+  max_result_text_chars: 1800

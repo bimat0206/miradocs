@@ -1,0 +1,57 @@
+[
+  {
+    "chunk_id": "chunk_net_tgw_001",
+    "doc_id": "doc_lz_001",
+    "chunk_type": "child_text_chunk",
+    "page_start": 32,
+    "page_end": 32,
+    "section_path": "4. Networking > 4.2 Transit Gateway",
+    "text": "The Transit Gateway (TGW) route table is configured with separate route tables for Prod and NonProd environments. Prod VPCs use route table rtb-prod-001 with propagation from Direct Connect. NonProd VPCs use rtb-nonprod-001 with internet egress via NAT Gateway.",
+    "entities": {"aws_services": ["Transit Gateway", "Direct Connect", "NAT Gateway"], "environments": ["Prod", "NonProd"], "cidrs": ["10.0.0.0/16"]},
+    "source_refs": {"page_image": "data/page_images/doc_lz_001/page_0032.png", "table_id": null, "figure_id": null}
+  },
+  {
+    "chunk_id": "chunk_sec_scp_001",
+    "doc_id": "doc_lz_001",
+    "chunk_type": "child_text_chunk",
+    "page_start": 55,
+    "page_end": 55,
+    "section_path": "5. Security > 5.3 Service Control Policies",
+    "text": "Service Control Policies (SCPs) enforce guardrails across the organization. A breakglass procedure allows temporary SCP bypass for emergency changes. SCP deletion is restricted to the Security OU admin role only. All SCP changes are logged to CloudTrail organization trail.",
+    "entities": {"aws_services": ["Organizations", "CloudTrail"], "governance": ["SCP", "Security OU", "breakglass"]},
+    "source_refs": {"page_image": "data/page_images/doc_lz_001/page_0055.png", "table_id": null, "figure_id": null}
+  },
+  {
+    "chunk_id": "chunk_log_ct_001",
+    "doc_id": "doc_lz_001",
+    "chunk_type": "child_text_chunk",
+    "page_start": 78,
+    "page_end": 78,
+    "section_path": "6. Logging > 6.1 CloudTrail",
+    "text": "CloudTrail is configured as an organization trail with management events enabled across all accounts. Data events are enabled for S3 and Lambda. Trail logs are stored in the Log Archive account S3 bucket with 7-year retention and KMS encryption.",
+    "entities": {"aws_services": ["CloudTrail", "S3", "Lambda", "KMS"], "governance": ["Log Archive", "organization trail"]},
+    "source_refs": {"page_image": "data/page_images/doc_lz_001/page_0078.png", "table_id": null, "figure_id": null}
+  },
+  {
+    "chunk_id": "chunk_net_table_001",
+    "doc_id": "doc_lz_001",
+    "chunk_type": "table_chunk",
+    "page_start": 34,
+    "page_end": 34,
+    "section_path": "4. Networking > 4.2 Transit Gateway",
+    "text": "| Route Table | Environment | CIDR | Target | Status |\n| rtb-prod-001 | Prod | 10.1.0.0/16 | tgw-attach-prod | Active |\n| rtb-nonprod-001 | NonProd | 10.2.0.0/16 | tgw-attach-nonprod | Active |",
+    "entities": {"aws_services": ["Transit Gateway"], "environments": ["Prod", "NonProd"], "cidrs": ["10.1.0.0/16", "10.2.0.0/16"]},
+    "source_refs": {"page_image": "data/page_images/doc_lz_001/page_0034.png", "table_id": "table_034_01", "figure_id": null}
+  },
+  {
+    "chunk_id": "chunk_irrelevant_001",
+    "doc_id": "doc_lz_001",
+    "chunk_type": "child_text_chunk",
+    "page_start": 5,
+    "page_end": 5,
+    "section_path": "1. Document Control > 1.2 Revision History",
+    "text": "Version 1.0 created on 2024-01-15 by John Smith. Reviewed by Jane Doe on 2024-01-20. Approved for distribution.",
+    "entities": {},
+    "source_refs": {"page_image": "data/page_images/doc_lz_001/page_0005.png", "table_id": null, "figure_id": null}
+  }
+]
