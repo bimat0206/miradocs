@@ -33,6 +33,7 @@ MiraDocs bridges the gap:
 
 MiraDocs parses your documents locally, builds a structured knowledge base, and exposes it to any MCP-compatible AI client — so every answer comes with a source page you can verify.
 
+![alt text](image.png)
 ---
 
 ## Capabilities
