@@ -215,13 +215,14 @@ claude mcp add-json miradocs '{
 {
   "mcpServers": {
     "miradocs": {
-      "command": ".venv/bin/python",
-      "args": ["-m", "src.mcp.server"],
-      "cwd": "/path/to/miradocs"
+      "command": "bash",
+      "args": ["-c", "cd /path/to/miradocs && .venv/bin/python -m src.mcp.server"]
     }
   }
 }
 ```
+
+> **Note:** Claude Desktop does not reliably support `cwd`. The `bash -c "cd ... && ..."` wrapper ensures the working directory is correct so Python can find the `src` module.
 </details>
 
 <details>

@@ -83,7 +83,7 @@ const mcpConfigs: { label: string; lang: string; code: string }[] = [
   {
     label: "Claude Desktop",
     lang: "claude_desktop_config.json",
-    code: JSON.stringify({ mcpServers: { miradocs: { command: MCP_PYTHON, args: ["-m", "src.mcp.server"], cwd: MCP_PATH } } }, null, 2),
+    code: JSON.stringify({ mcpServers: { miradocs: { command: "bash", args: ["-c", `cd ${MCP_PATH} && .venv/bin/python -m src.mcp.server`] } } }, null, 2),
   },
   {
     label: "Cursor",

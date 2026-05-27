@@ -23,7 +23,7 @@ const MCP_PYTHON = `${MCP_PATH}/.venv/bin/python`;
 
 const mcpConfigs = [
   { label: "Claude Code", lang: ".claude/settings.json", code: JSON.stringify({ mcpServers: { miradocs: { type: "stdio", command: MCP_PYTHON, args: ["-m", "src.mcp.server"], cwd: MCP_PATH, env: {} } } }, null, 2) },
-  { label: "Claude Desktop", lang: "claude_desktop_config.json", code: JSON.stringify({ mcpServers: { miradocs: { command: MCP_PYTHON, args: ["-m", "src.mcp.server"], cwd: MCP_PATH } } }, null, 2) },
+  { label: "Claude Desktop", lang: "claude_desktop_config.json", code: JSON.stringify({ mcpServers: { miradocs: { command: "bash", args: ["-c", `cd ${MCP_PATH} && .venv/bin/python -m src.mcp.server`] } } }, null, 2) },
   { label: "Cursor", lang: ".cursor/mcp.json", code: JSON.stringify({ mcpServers: { miradocs: { command: MCP_PYTHON, args: ["-m", "src.mcp.server"], cwd: MCP_PATH } } }, null, 2) },
   { label: "Windsurf", lang: "~/.codeium/windsurf/mcp_config.json", code: JSON.stringify({ mcpServers: { miradocs: { command: MCP_PYTHON, args: ["-m", "src.mcp.server"], cwd: MCP_PATH } } }, null, 2) },
   { label: "Gemini CLI", lang: "~/.gemini/settings.json", code: JSON.stringify({ mcpServers: { miradocs: { command: MCP_PYTHON, args: ["-m", "src.mcp.server"], cwd: MCP_PATH, env: {} } } }, null, 2) },
