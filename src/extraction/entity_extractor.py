@@ -58,6 +58,12 @@ GOVERNANCE_TERMS = {
     "Network Account", "Security Account",
 }
 
+# Pre-compiled patterns — avoid re-compiling on every page
+_ENV_PATTERNS: list[tuple[str, re.Pattern]] = [
+    (env, re.compile(r'\b' + re.escape(env) + r'\b', re.IGNORECASE))
+    for env in ENVIRONMENT_LABELS
+]
+
 
 def extract_entities(pages_text: list[dict], doc_id: str) -> list[dict]:
     """Extract entities from page texts. Returns entity inventory."""
@@ -91,8 +97,8 @@ def extract_entities(pages_text: list[dict], doc_id: str) -> list[dict]:
                 all_entities.append(_entity("azure_service", svc, page_num))
                 entity_counts["azure_service"][svc] += 1
 
-        for env in ENVIRONMENT_LABELS:
-            if re.search(r'\b' + re.escape(env) + r'\b', text, re.IGNORECASE):
+        for env, pattern in _ENV_PATTERNS:
+            if pattern.search(text):
                 all_entities.append(_entity("environment", env, page_num))
                 entity_counts["environment"][env] += 1
 

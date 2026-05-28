@@ -11,6 +11,28 @@ from src.mcp.schemas import SearchDocsOutput, SearchResultItem
 
 logger = logging.getLogger("retrieval_service")
 
+# Module-level singletons — created once per process
+_hybrid_engine = None
+_registry = None
+# Process-level chunk cache keyed by doc_id; invalidated on server restart
+_chunks_cache: dict[str, list[dict]] = {}
+
+
+def _get_hybrid_engine():
+    global _hybrid_engine
+    if _hybrid_engine is None:
+        from src.indexing.hybrid_search import HybridSearchEngine
+        _hybrid_engine = HybridSearchEngine()
+    return _hybrid_engine
+
+
+def _get_registry():
+    global _registry
+    if _registry is None:
+        from src.intake.document_registry import DocumentRegistry
+        _registry = DocumentRegistry()
+    return _registry
+
 
 class RetrievalService:
     """Unified search interface over vector stores and keyword fallback."""
@@ -99,15 +121,13 @@ class RetrievalService:
     def _try_vector_search(self, query: str, top_k: int, filters: dict | None) -> tuple[list[dict], str]:
         """Try vector search via existing adapters."""
         try:
-            from src.indexing.hybrid_search import HybridSearchEngine
-            engine = HybridSearchEngine()
+            engine = _get_hybrid_engine()
             qdrant_filters = {}
             if filters:
                 if filters.get("doc_id"):
                     qdrant_filters["doc_id"] = filters["doc_id"]
             results = engine.search(query, top_k=top_k, filters=qdrant_filters or None)
             if results:
-                # Enrich with doc metadata
                 return self._enrich_results(results, filters), "hybrid"
         except Exception as e:
             logger.warning("Vector search unavailable: %s", e)
@@ -124,9 +144,18 @@ class RetrievalService:
         if not query_terms:
             return []
 
+        # Narrow to specific doc(s) when a filter is set — avoids scanning the whole corpus
+        doc_id_filter = filters.get("doc_id") if filters else None
+        if doc_id_filter:
+            doc_ids = [doc_id_filter] if isinstance(doc_id_filter, str) else list(doc_id_filter)
+            chunk_files = [parsed_dir / did / "chunks.json" for did in doc_ids]
+            chunk_files = [f for f in chunk_files if f.exists()]
+        else:
+            chunk_files = list(parsed_dir.rglob("chunks.json"))
+
         all_scored: list[tuple[float, dict]] = []
 
-        for chunks_file in parsed_dir.rglob("chunks.json"):
+        for chunks_file in chunk_files:
             try:
                 chunks = json.loads(chunks_file.read_text(encoding="utf-8"))
                 doc_id = chunks_file.parent.name
@@ -165,11 +194,8 @@ class RetrievalService:
 
     def _enrich_results(self, results: list[dict], filters: dict | None) -> list[dict]:
         """Enrich vector search results with doc metadata if available."""
-        # Results from hybrid search already have most fields
-        # Add source_file from registry if possible
         try:
-            from src.intake.document_registry import DocumentRegistry
-            registry = DocumentRegistry()
+            registry = _get_registry()
             for r in results:
                 doc_id = r.get("doc_id", "")
                 if doc_id:
@@ -298,9 +324,11 @@ class RetrievalService:
         return merged, "graph_local", graph_annotations
 
     def _load_chunks_for_doc(self, doc_id: str) -> list[dict]:
-        """Load chunks.json for a document. Returns [] on any error."""
-        path = get_data_dir() / "parsed" / doc_id / "chunks.json"
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return []
+        """Load chunks.json for a document, cached for the process lifetime."""
+        if doc_id not in _chunks_cache:
+            path = get_data_dir() / "parsed" / doc_id / "chunks.json"
+            try:
+                _chunks_cache[doc_id] = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                _chunks_cache[doc_id] = []
+        return _chunks_cache[doc_id]

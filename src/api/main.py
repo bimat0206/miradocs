@@ -110,9 +110,10 @@ def create_app(
 
     @app.get("/api/documents")
     def documents(tag: str | None = None):
-        docs = list_documents(app.state.registry)
         if tag:
-            docs = [d for d in docs if tag.casefold() in [t.casefold() for t in d.get("tags", [])]]
+            docs = app.state.registry.list_documents_by_tag(tag)
+        else:
+            docs = list_documents(app.state.registry)
         return {"documents": docs}
 
     @app.get("/api/tags")
@@ -509,6 +510,7 @@ def create_app(
             query=request.query,
             top_k=request.top_k,
             index_adapter_factory=app.state.index_adapter_factory,
+            registry=app.state.registry,
             hybrid=request.hybrid,
             rerank=request.rerank,
             dense_weight=request.dense_weight,

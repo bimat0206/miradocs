@@ -1,6 +1,7 @@
 """SQLite-backed document registry and pipeline state tracker."""
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +58,8 @@ CREATE TABLE IF NOT EXISTS pipeline_run_events (
     FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_pipeline_run_events_run_id ON pipeline_run_events(run_id);
+
 CREATE TABLE IF NOT EXISTS compare_runs (
     run_id TEXT PRIMARY KEY,
     source_doc_id TEXT NOT NULL,
@@ -104,11 +107,17 @@ class DocumentRegistry:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or get_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local = threading.local()
         self._init_db()
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn = conn
         return conn
 
     def _init_db(self):
@@ -170,6 +179,17 @@ class DocumentRegistry:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM documents ORDER BY upload_time DESC"
+            ).fetchall()
+            return [self._row_to_document(r) for r in rows]
+
+    def list_documents_by_tag(self, tag: str) -> list[dict]:
+        """Return documents whose tags_json contains tag (case-insensitive)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT d.* FROM documents d, json_each(d.tags_json) t
+                   WHERE LOWER(t.value) = LOWER(?)
+                   ORDER BY d.upload_time DESC""",
+                (tag,),
             ).fetchall()
             return [self._row_to_document(r) for r in rows]
 
@@ -405,29 +425,32 @@ class DocumentRegistry:
             )
 
     def add_compare_findings(self, run_id: str, findings: list[dict[str, Any]]):
+        rows = [
+            (
+                finding.get("finding_id") or uuid.uuid4().hex,
+                run_id,
+                finding["type"],
+                finding["severity"],
+                finding["title"],
+                finding["description"],
+                json.dumps(finding.get("source_evidence", [])),
+                json.dumps(finding.get("target_evidence", [])),
+                finding.get("normalized_key", finding["title"]),
+                finding.get("llm_status", "not_requested"),
+                finding.get("llm_summary"),
+                finding.get("llm_recommendation"),
+            )
+            for finding in findings
+        ]
         with self._conn() as conn:
-            for finding in findings:
-                conn.execute(
-                    """INSERT INTO compare_findings
-                    (finding_id, run_id, type, severity, title, description,
-                     source_evidence_json, target_evidence_json, normalized_key,
-                     llm_status, llm_summary, llm_recommendation)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        finding.get("finding_id") or uuid.uuid4().hex,
-                        run_id,
-                        finding["type"],
-                        finding["severity"],
-                        finding["title"],
-                        finding["description"],
-                        json.dumps(finding.get("source_evidence", [])),
-                        json.dumps(finding.get("target_evidence", [])),
-                        finding.get("normalized_key", finding["title"]),
-                        finding.get("llm_status", "not_requested"),
-                        finding.get("llm_summary"),
-                        finding.get("llm_recommendation"),
-                    ),
-                )
+            conn.executemany(
+                """INSERT INTO compare_findings
+                (finding_id, run_id, type, severity, title, description,
+                 source_evidence_json, target_evidence_json, normalized_key,
+                 llm_status, llm_summary, llm_recommendation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
 
     def get_compare_run(self, run_id: str) -> Optional[dict]:
         with self._conn() as conn:

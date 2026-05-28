@@ -257,8 +257,19 @@ def _build_cooccurrence_graph(
         page = int(ent.get("page", 0))
         page_buckets.setdefault(page, []).append(ent)
 
-    # Performance guard: cap entities per page at 50 (drop lower-frequency)
-    # to avoid O(n²) blowup on dense documents
+    # Deduplicate by (type, value) within each page before pairing to avoid
+    # O(n²) blowup from repeated occurrences of the same entity on one page.
+    for page in page_buckets:
+        seen_ids: set[str] = set()
+        deduped = []
+        for ent in page_buckets[page]:
+            nid = _make_node_id(ent["type"], ent["value"])
+            if nid not in seen_ids:
+                seen_ids.add(nid)
+                deduped.append(ent)
+        page_buckets[page] = deduped
+
+    # Performance guard: cap entities per page at 50
     for page in page_buckets:
         if len(page_buckets[page]) > 50:
             page_buckets[page] = page_buckets[page][:50]

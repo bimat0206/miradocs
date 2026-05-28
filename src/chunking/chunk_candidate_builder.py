@@ -23,6 +23,7 @@ def build_chunks(
     cfg = get_config()
     max_tokens = cfg["chunking"]["max_chunk_tokens"]
     max_chars = max_tokens * 4  # rough char estimate
+    overlap_chars = cfg["chunking"].get("overlap_tokens", 0) * 4
 
     chunks = []
     img_map = {p["page_number"]: p["image_path"] for p in page_images}
@@ -50,8 +51,8 @@ def build_chunks(
         text = page_info.get("text", "")
         if not text.strip():
             continue
-        # Split long pages into sub-chunks
-        for i, chunk_text in enumerate(_split_text(text, max_chars)):
+        # Split long pages into sub-chunks with overlap
+        for i, chunk_text in enumerate(_split_text(text, max_chars, overlap_chars)):
             section_path = _find_section_for_page(sections, pg)
             chunks.append(_make_chunk(
                 doc_id=doc_id,
@@ -140,8 +141,8 @@ def _get_text_for_pages(pages_text: list[dict], start: int, end: int) -> str:
     return "\n".join(parts)
 
 
-def _split_text(text: str, max_chars: int) -> list[str]:
-    """Split text into chunks respecting paragraph boundaries."""
+def _split_text(text: str, max_chars: int, overlap_chars: int = 0) -> list[str]:
+    """Split text into chunks at paragraph boundaries, with optional tail overlap."""
     if len(text) <= max_chars:
         return [text]
     chunks = []
@@ -156,7 +157,16 @@ def _split_text(text: str, max_chars: int) -> list[str]:
             current = current + "\n\n" + para if current else para
     if current:
         chunks.append(current)
-    return chunks if chunks else [text[:max_chars]]
+    result = chunks if chunks else [text[:max_chars]]
+    if overlap_chars <= 0 or len(result) <= 1:
+        return result
+    # Prepend tail of previous chunk to each subsequent chunk so context
+    # at split boundaries is present in both neighbours.
+    overlapped = [result[0]]
+    for i in range(1, len(result)):
+        tail = result[i - 1][-overlap_chars:]
+        overlapped.append(tail + "\n\n" + result[i])
+    return overlapped
 
 
 def _entities_for_pages(entities: list[dict], start: int, end: int) -> dict:

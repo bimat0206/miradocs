@@ -1,5 +1,5 @@
 """Pipeline runner shared by API jobs."""
-import concurrent.futures
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Any
@@ -135,23 +135,34 @@ def run_pipeline(
             "eta_seconds": eta_from_percent(pct_start) if pct_start > 0 else None,
         })
         registry.update_step(doc_id, step_name, "running")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func)
-            while True:
-                try:
-                    result = future.result(timeout=5)
-                    break
-                except concurrent.futures.TimeoutError:
-                    sp = soft_pct()
-                    notify({
-                        "step": step_name,
-                        "label": label,
-                        "status": "running",
-                        "percent": sp,
-                        "elapsed_seconds": time.monotonic() - started,
-                        "eta_seconds": eta_from_percent(sp),
-                        "message": f"{label} still running",
-                    })
+        result_holder: list[Any] = [None]
+        exc_holder: list[BaseException | None] = [None]
+
+        def _target():
+            try:
+                result_holder[0] = func()
+            except BaseException as exc:
+                exc_holder[0] = exc
+
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+        while True:
+            t.join(timeout=5)
+            if not t.is_alive():
+                break
+            sp = soft_pct()
+            notify({
+                "step": step_name,
+                "label": label,
+                "status": "running",
+                "percent": sp,
+                "elapsed_seconds": time.monotonic() - started,
+                "eta_seconds": eta_from_percent(sp),
+                "message": f"{label} still running",
+            })
+        if exc_holder[0] is not None:
+            raise exc_holder[0]
+        result = result_holder[0]
         registry.update_step(doc_id, step_name, "success")
         notify({
             "step": step_name,
@@ -163,6 +174,45 @@ def run_pipeline(
         })
         return result
 
+    def run_steps_parallel(step_defs: list[tuple]) -> list[Any]:
+        """Run multiple pipeline steps concurrently and wait for all to finish."""
+        results: list[Any] = [None] * len(step_defs)
+        exc_holder: list[BaseException | None] = [None] * len(step_defs)
+
+        def run_one(idx: int, step_name: str, label: str, completed_after: int, func):
+            try:
+                results[idx] = run_step(step_name, label, completed_after, func)
+            except BaseException as exc:
+                exc_holder[idx] = exc
+                registry.update_step(doc_id, step_name, "failed", str(exc))
+                notify({
+                    "step": step_name,
+                    "label": label,
+                    "status": "failed",
+                    "percent": int(((completed_after - 1) / total) * 100),
+                    "elapsed_seconds": time.monotonic() - started,
+                    "eta_seconds": None,
+                    "message": str(exc),
+                })
+
+        threads = [
+            threading.Thread(
+                target=run_one,
+                args=(idx, step_name, label, completed_after, func),
+                daemon=True,
+            )
+            for idx, (step_name, label, completed_after, func) in enumerate(step_defs)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        first_exc = next((e for e in exc_holder if e is not None), None)
+        if first_exc is not None:
+            raise first_exc
+        return results
+
     try:
         parse_result = run_step(
             "parsed",
@@ -170,31 +220,15 @@ def run_pipeline(
             1,
             lambda: parse_document(raw_path, doc_id),
         )
-        page_images = run_step(
-            "page_images",
-            "Page Images",
-            2,
-            lambda: extract_page_images(raw_path, doc_id),
-        )
-        tables = run_step(
-            "tables_extracted",
-            "Tables",
-            3,
-            lambda: extract_tables(parse_result, doc_id),
-        )
-        figures = run_step(
-            "figures_extracted",
-            "Figures",
-            4,
-            lambda: extract_figures(raw_path, parse_result, doc_id),
-        )
+        # Compute pages_text once here so all parallel lambdas can close over it
         pages_text = _get_pages_text(parse_result, raw_path)
-        entities = run_step(
-            "entities_extracted",
-            "Entities",
-            5,
-            lambda: extract_entities(pages_text, doc_id),
-        )
+        # Steps 2-5 are independent — run them concurrently
+        page_images, tables, figures, entities = run_steps_parallel([
+            ("page_images",       "Page Images", 2, lambda: extract_page_images(raw_path, doc_id)),
+            ("tables_extracted",  "Tables",      3, lambda: extract_tables(parse_result, doc_id)),
+            ("figures_extracted", "Figures",     4, lambda: extract_figures(raw_path, parse_result, doc_id)),
+            ("entities_extracted","Entities",    5, lambda: extract_entities(pages_text, doc_id)),
+        ])
         run_step(
             "relations_extracted",
             "Relations",

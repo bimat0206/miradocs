@@ -3,6 +3,7 @@ import math
 import re
 import logging
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from src.config import get_config, get_data_dir
@@ -145,11 +146,12 @@ def rerank_with_ollama(
     model: str,
     top_k: int,
 ) -> list[dict]:
-    """Rerank using Ollama LLM to score relevance of each candidate."""
+    """Rerank using Ollama LLM, scoring all candidates in parallel."""
     import httpx
 
-    scored = []
-    for candidate in candidates[:top_k * 2]:
+    pool = candidates[:top_k * 2]
+
+    def score_one(candidate: dict) -> dict:
         text = candidate.get("text", "")[:500]
         prompt = (
             f"Rate the relevance of this passage to the query on a scale of 0-10.\n"
@@ -165,14 +167,16 @@ def rerank_with_ollama(
             )
             if resp.status_code == 200:
                 answer = resp.json().get("response", "0").strip()
-                # Extract first number from response
                 match = re.search(r"(\d+(?:\.\d+)?)", answer)
                 score = float(match.group(1)) if match else 0.0
-                scored.append({**candidate, "rerank_score": min(score, 10.0)})
-            else:
-                scored.append({**candidate, "rerank_score": 0.0})
+                return {**candidate, "rerank_score": min(score, 10.0)}
         except Exception:
-            scored.append({**candidate, "rerank_score": 0.0})
+            pass
+        return {**candidate, "rerank_score": 0.0}
+
+    workers = min(len(pool), 5)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        scored = list(executor.map(score_one, pool))
 
     scored.sort(key=lambda x: x["rerank_score"], reverse=True)
     return scored[:top_k]

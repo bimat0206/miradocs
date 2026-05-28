@@ -154,18 +154,23 @@ class QdrantAdapter(IndexAdapter):
         return result[0] if result else None
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Get embeddings from Ollama."""
+        """Get embeddings from Ollama in sub-batches to avoid timeout on large chunk sets."""
+        BATCH_SIZE = 32
+        results: list[list[float]] = []
         try:
-            resp = httpx.post(
-                f"{self.ollama_url}/api/embed",
-                json={"model": self.embed_model, "input": texts},
-                timeout=120.0,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("embeddings", [])
-            logger.error(f"Ollama embed failed: {resp.status_code}")
-            return []
+            for i in range(0, len(texts), BATCH_SIZE):
+                batch = texts[i : i + BATCH_SIZE]
+                resp = httpx.post(
+                    f"{self.ollama_url}/api/embed",
+                    json={"model": self.embed_model, "input": batch},
+                    timeout=120.0,
+                )
+                if resp.status_code == 200:
+                    results.extend(resp.json().get("embeddings", []))
+                else:
+                    logger.error(f"Ollama embed failed: {resp.status_code}")
+                    return []
         except Exception as e:
             logger.error(f"Embedding error: {e}")
             return []
+        return results

@@ -17,17 +17,28 @@ class Job:
     next_seq: int = 0
 
 
+_MAX_COMPLETED_JOBS = 200
+
+
 class JobManager:
     def __init__(self):
         self.jobs: dict[str, Job] = {}
         self.active_by_doc: dict[str, str] = {}
 
     def create(self, doc_id: str) -> Job:
+        self._evict_completed()
         job = Job(job_id=uuid.uuid4().hex, doc_id=doc_id)
         self.jobs[job.job_id] = job
         self.active_by_doc[doc_id] = job.job_id
         self.emit(job.job_id, "queued", {"message": "Pipeline queued"})
         return job
+
+    def _evict_completed(self):
+        completed = [jid for jid, j in self.jobs.items() if j.status in {"done", "failed"}]
+        if len(completed) <= _MAX_COMPLETED_JOBS:
+            return
+        for jid in completed[: len(completed) - _MAX_COMPLETED_JOBS]:
+            self.jobs.pop(jid, None)
 
     def get(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)

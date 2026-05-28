@@ -5,6 +5,16 @@ from typing import Any, Callable
 
 from src.intake.document_registry import DocumentRegistry
 
+_hybrid_engine = None
+
+
+def _get_hybrid_engine():
+    global _hybrid_engine
+    if _hybrid_engine is None:
+        from src.indexing.hybrid_search import HybridSearchEngine
+        _hybrid_engine = HybridSearchEngine()
+    return _hybrid_engine
+
 
 def index_document(doc_id: str, data_dir: Path, index_adapter_factory: Callable[[], Any]) -> dict:
     chunks_path = data_dir / "parsed" / doc_id / "chunks.json"
@@ -61,6 +71,7 @@ def search_document(
     query: str,
     top_k: int,
     index_adapter_factory: Callable[[], Any],
+    registry: DocumentRegistry | None = None,
     hybrid: bool = True,
     rerank: bool = False,
     dense_weight: float = 0.7,
@@ -96,8 +107,7 @@ def search_document(
         ]
 
     if hybrid:
-        from src.indexing.hybrid_search import HybridSearchEngine
-        engine = HybridSearchEngine()
+        engine = _get_hybrid_engine()
         results = engine.search(
             query=query,
             top_k=top_k,
@@ -113,19 +123,18 @@ def search_document(
         )
 
     # Enrich with source file name from registry
-    try:
-        from src.intake.document_registry import DocumentRegistry
-        registry = DocumentRegistry()
-        for r in results:
-            r_doc_id = r.get("doc_id")
-            if r_doc_id:
-                doc = registry.get_document(r_doc_id)
-                if doc:
-                    r["source_file"] = doc.get("filename", "")
-                    r["document_type"] = doc.get("document_type", "")
-                    r["domain"] = doc.get("domain", "")
-    except Exception:
-        pass
+    if registry is not None:
+        try:
+            for r in results:
+                r_doc_id = r.get("doc_id")
+                if r_doc_id:
+                    doc = registry.get_document(r_doc_id)
+                    if doc:
+                        r["source_file"] = doc.get("filename", "")
+                        r["document_type"] = doc.get("document_type", "")
+                        r["domain"] = doc.get("domain", "")
+        except Exception:
+            pass
 
     # Enrich with page evidence
     from src.indexing.page_evidence import PageImageEvidence
