@@ -19,7 +19,7 @@ class HybridSearchEngine:
         self.reranker: Reranker | None = None
         cfg = get_config()
         self._ollama_url = cfg["embedding"]["ollama_url"]
-        self._rerank_model = cfg.get("search", {}).get("rerank_model", "llama3.2")
+        self._rerank_model = cfg.get("search", {}).get("rerank_model", "qwen2.5:3b")
         self._use_reranker = cfg.get("search", {}).get("rerank_enabled", False)
 
     def search(
