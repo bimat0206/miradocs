@@ -15,6 +15,7 @@
 - [Run](#run)
 - [Cleanup](#cleanup)
 - [MCP Server — Connect Your AI Client](#mcp-server--connect-your-ai-client)
+- [Auto-Update](#auto-update)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
@@ -33,7 +34,6 @@ MiraDocs bridges the gap:
 
 MiraDocs parses your documents locally, builds a structured knowledge base, and exposes it to any MCP-compatible AI client — so every answer comes with a source page you can verify.
 
-![alt text](image.png)
 ---
 
 ## Capabilities
@@ -87,14 +87,14 @@ Clone the repo and run the one-shot setup script. It installs all dependencies, 
 
 **macOS / Linux**
 ```bash
-git clone https://github.com/bimat0206/miradocs.git
+git clone https://github.com/your-username/miradocs.git
 cd miradocs
 chmod +x setup.sh && ./setup.sh
 ```
 
 **Windows** (PowerShell, run as Administrator)
 ```powershell
-git clone https://github.com/bimat0206/miradocs.git
+git clone https://github.com/your-username/miradocs.git
 cd miradocs
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\setup.ps1
@@ -399,3 +399,65 @@ entity_extraction:
                          (AI clients)       (localhost:3000)
 ```
 
+### Pipeline steps
+
+| Step | Output |
+|---|---|
+| 1. Upload | Raw file registered in SQLite |
+| 2. Parse | `document.json`, `full_document.md` |
+| 3. Page images | `page_NNNN.png` per page |
+| 4. Tables | CSV + Markdown per table |
+| 5. Figures | Cropped PNG per figure |
+| 6. Entities | `entities.json` |
+| 7. Metadata | `doc_manifest.json`, `document_structure.json` |
+| 8. Quality | `quality_report.json` |
+| 9. Chunks | `chunks.json` |
+| 10. Index | Qdrant collection |
+
+---
+
+## Auto-Update
+
+MiraDocs checks for new versions on startup by comparing the local `VERSION` file against the latest on GitHub.
+
+### How it works
+
+1. App loads → frontend calls `/api/version-check`
+2. If a newer version exists → a popup appears: *"New version available. Update now?"*
+3. User clicks **Yes** → backend spawns a detached update process
+4. The update script stops services, pulls changes, installs dependencies (if changed), and restarts the stack
+5. Frontend polls `/api/health` until the app comes back → auto-reloads the page
+
+### Manual update
+
+You can also update manually at any time:
+
+```bash
+./update.sh
+```
+
+### Releasing a new version
+
+Bump the `VERSION` file on your main branch:
+
+```bash
+echo "1.1.0" > VERSION
+git add VERSION && git commit -m "release: v1.1.0" && git push
+```
+
+All running instances will see the update popup on next page load.
+
+---
+
+## Troubleshooting
+
+| Issue | Fix |
+|---|---|
+| `docling` import fails | `pip install docling` (requires PyTorch — takes a few minutes) |
+| Ollama not responding | Run `ollama serve` in a separate terminal |
+| `bge-m3` not found | `ollama pull bge-m3` |
+| Page images missing | `pip install PyMuPDF` |
+| Qdrant errors after config change | Delete `data/indexes/qdrant/` and re-index |
+| MCP server not found by client | Check `cwd` in your client config points to the project root |
+| No search results | Ensure documents are indexed — run Index from the workspace UI first |
+| Windows MCP path error | Use `.venv\Scripts\python.exe` and backslashes in `cwd` |
