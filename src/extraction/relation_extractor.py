@@ -333,7 +333,7 @@ def _build_llm_relation_graph(
     try:
         import httpx
         ollama_url = cfg.get("embedding", {}).get("ollama_url", "http://localhost:11434")
-        model = cfg.get("graph", {}).get("ollama_model", "qwen2.5:3b")
+        model = cfg["graph"]["ollama_model"]
 
         # Build entity value set for filtering LLM output
         known_entities: dict[str, dict] = {}
