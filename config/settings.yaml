@@ -30,13 +30,13 @@ quality:
 
 entity_extraction:
   use_llm: true
-  ollama_model: "qwen2.5:3b"
+  ollama_model: "qwen3.5:4b"
 
 search:
   dense_weight: 0.7
   sparse_weight: 0.3
   rerank_enabled: true
-  rerank_model: "bge-m3"
+  rerank_model: "qwen3.5:4b"
   default_top_k: 10
   rerank_top_k: 5
 
@@ -56,5 +56,5 @@ graph:
   co_occurrence_window_pages: 1    # pages within which two entities are considered co-occurring
   max_expansion_hops: 1            # depth for graph_local search expansion
   max_expanded_chunks: 5           # max extra chunks injected per query via graph walk
-  ollama_model: "qwen2.5:3b"         # used only when use_llm_relations: true
+  ollama_model: "qwen3.5:4b"         # used only when use_llm_relations: true
   min_edge_weight: 1               # prune edges below this weight

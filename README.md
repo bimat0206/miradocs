@@ -76,7 +76,7 @@ The setup script installs everything automatically. If you prefer to install man
 | Node.js | 20+ | Required for the Next.js frontend |
 | Ollama | latest | Local model runtime |
 | `bge-m3` model | — | `ollama pull bge-m3` — used for embeddings |
-| `qwen2.5:3b` model | — | `ollama pull qwen2.5:3b` — used for entity extraction and reranking |
+| `qwen3.5:4b` model | — | `ollama pull qwen3.5:4b` — used for entity extraction and reranking |
 
 > **No cloud account or API key is needed** to run the pipeline, search, or MCP server.  
 > An external LLM API key (Anthropic, OpenAI, Gemini) is only needed if you enable the optional Review Agent feature.
@@ -107,7 +107,7 @@ The setup script:
 2. Creates a Python virtual environment at `.venv/`
 3. Installs Python dependencies from `requirements.txt`
 4. Installs frontend npm packages in `frontend/`
-5. Pulls the `bge-m3` and `qwen2.5:3b` Ollama models
+5. Pulls the `bge-m3` and `qwen3.5:4b` Ollama models
 6. Creates the `data/` directory structure
 7. Initialises the SQLite registry
 8. Verifies the MCP server is importable
@@ -359,14 +359,14 @@ search:
   dense_weight: 0.7             # hybrid score = dense*0.7 + sparse*0.3
   sparse_weight: 0.3
   rerank_enabled: true
-  rerank_model: "qwen2.5:3b"
+  rerank_model: "qwen3.5:4b"
   default_top_k: 10
   rerank_top_k: 5               # candidates passed to reranker
 
 # -- Entity Extraction ────────────────────────────────────────
 entity_extraction:
   use_llm: true                 # false = regex only (faster); true = Ollama enrichment
-  ollama_model: "qwen2.5:3b"
+  ollama_model: "qwen3.5:4b"
 
 # -- Graph (local GraphRAG) ───────────────────────────────────
 graph:
@@ -374,7 +374,7 @@ graph:
   co_occurrence_window_pages: 1 # pages within which two entities are considered co-occurring
   max_expansion_hops: 1         # depth for graph_local expansion
   max_expanded_chunks: 5        # max extra chunks injected per query via graph walk
-  ollama_model: "qwen2.5:3b"      # used only when use_llm_relations: true
+  ollama_model: "qwen3.5:4b"      # used only when use_llm_relations: true
   min_edge_weight: 1            # prune edges below this co-occurrence count
 ```
 

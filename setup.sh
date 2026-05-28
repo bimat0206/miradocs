@@ -12,7 +12,7 @@
 #   6. Installs Python dependencies (requirements.txt)
 #   7. Installs frontend npm dependencies (frontend/)
 #   8. Starts Ollama daemon if not running
-#   9. Pulls required Ollama models (bge-m3, qwen2.5:3b)
+#   9. Pulls required Ollama models (read from config/settings.yaml)
 #  10. Creates required data directories
 #  11. Initialises SQLite registry
 #  12. Verifies MCP server is importable
@@ -222,11 +222,12 @@ fi
 # ── 9. Pull Required Ollama Models ───────────────────────────
 header "Ollama Models"
 
-# Models required by config/settings.yaml
-MODELS=(
-    "bge-m3"     # Embedding model (1024-dim, dense search)
-    "qwen2.5:3b"   # LLM: entity extraction + reranking
-)
+# Models read from config/settings.yaml (single source of truth)
+CONFIG_FILE="${SCRIPT_DIR}/config/settings.yaml"
+MODELS=()
+while IFS= read -r model; do
+    [[ -n "$model" ]] && MODELS+=("$model")
+done < <(grep -E '^\s+(model|ollama_model|rerank_model):' "$CONFIG_FILE" | sed 's/.*: *"\([^"]*\)".*/\1/' | sort -u)
 
 for model in "${MODELS[@]}"; do
     if ollama_running; then
