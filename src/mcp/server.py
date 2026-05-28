@@ -86,6 +86,7 @@ TOOLS = [
                 "project": {"type": "string", "description": "Filter by project name"},
                 "domain": {"type": "string", "description": "Filter by domain"},
                 "document_type": {"type": "string", "description": "Filter by document type"},
+                "tag": {"type": "string", "description": "Filter by tag (returns docs containing this tag)"},
             },
         },
     },

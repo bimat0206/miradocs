@@ -51,6 +51,7 @@ class ListDocsInput(BaseModel):
     project: str | None = Field(default=None, description="Filter by project name")
     domain: str | None = Field(default=None, description="Filter by domain")
     document_type: str | None = Field(default=None, description="Filter by document type")
+    tag: str | None = Field(default=None, description="Filter by tag (returns docs containing this tag)")
 
 
 class DocSummary(BaseModel):

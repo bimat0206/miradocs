@@ -84,6 +84,8 @@ def list_documents(params: ListDocsInput) -> ListDocsOutput:
         docs = [d for d in docs if d["domain"] == params.domain]
     if params.document_type:
         docs = [d for d in docs if d["document_type"] == params.document_type]
+    if params.tag:
+        docs = [d for d in docs if params.tag.casefold() in [t.casefold() for t in d.get("tags", [])]]
 
     summaries = []
     for d in docs:

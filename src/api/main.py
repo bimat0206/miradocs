@@ -109,8 +109,20 @@ def create_app(
         }
 
     @app.get("/api/documents")
-    def documents():
-        return {"documents": list_documents(app.state.registry)}
+    def documents(tag: str | None = None):
+        docs = list_documents(app.state.registry)
+        if tag:
+            docs = [d for d in docs if tag.casefold() in [t.casefold() for t in d.get("tags", [])]]
+        return {"documents": docs}
+
+    @app.get("/api/tags")
+    def get_all_tags():
+        docs = list_documents(app.state.registry)
+        tags: dict[str, int] = {}
+        for d in docs:
+            for t in d.get("tags", []):
+                tags[t] = tags.get(t, 0) + 1
+        return {"tags": [{"name": k, "count": v} for k, v in sorted(tags.items())]}
 
     @app.post("/api/documents", status_code=201)
     async def upload_document(
