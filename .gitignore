@@ -1,36 +1,15 @@
-# Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-*.egg-info/
 .pytest_cache/
 .venv/
-
-# Node
-frontend/node_modules/
-frontend/.next/
-frontend/.playwright-cli/
-frontend/tsconfig.tsbuildinfo
-
-# Data (user documents — never commit)
-data/raw/*
-data/parsed/*
-data/page_images/*
-data/tables/*
-data/figures/*
-data/indexes/*
-data/reports/*
-!data/**/.gitkeep
+data/raw/
+data/parsed/
+data/page_images/
+data/tables/
+data/figures/
+data/indexes/
+data/reports/
 data/registry.db
-data/llm_settings.json
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Local Claude Code settings (machine-specific paths and permissions)
-.claude/settings.local.json
-
-# Temp / scratch
-temp_*.txt
+*.egg-info/
+data/update.log
+data/update-status.json

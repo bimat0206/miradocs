@@ -57,6 +57,7 @@ class SearchRequest(BaseModel):
     rerank: bool = False
     dense_weight: float = Field(default=0.7, ge=0, le=1)
     sparse_weight: float = Field(default=0.3, ge=0, le=1)
+    search_mode: str = "auto"
 
 
 class TagsUpdateRequest(BaseModel):
@@ -219,13 +220,14 @@ def create_app(
                 detail="Pipeline is already marked running. Restart the app or wait for the active run to finish.",
             )
 
-        # Determine if steps 1-8 are complete and indexing is pending/failed
+        # Determine if steps 1-9 are complete and indexing is pending/failed
         statuses = {step["step_name"]: step["status"] for step in steps}
-        steps_1_8 = [
+        steps_1_9 = [
             "parsed", "page_images", "tables_extracted", "figures_extracted",
-            "entities_extracted", "metadata_built", "quality_checked", "chunks_created"
+            "entities_extracted", "relations_extracted", "metadata_built",
+            "quality_checked", "chunks_created",
         ]
-        steps_1_8_complete = all(statuses.get(name) == "success" for name in steps_1_8)
+        steps_1_8_complete = all(statuses.get(name) == "success" for name in steps_1_9)
         indexing_complete = statuses.get("indexed") == "success"
 
         if steps_1_8_complete and indexing_complete:
@@ -440,6 +442,48 @@ def create_app(
             app.state.index_adapter_factory,
         )
 
+    @app.get("/api/documents/{doc_id}/graph")
+    def get_entity_graph(
+        doc_id: str,
+        entity_type: str | None = None,
+        min_edge_weight: int = 1,
+    ):
+        if not app.state.registry.get_document(doc_id):
+            raise HTTPException(status_code=404, detail="Document not found")
+        from src.mcp.schemas import GetEntityGraphInput
+        from src.mcp import tools as mcp_tools
+        params = GetEntityGraphInput(
+            doc_id=doc_id,
+            entity_type=entity_type,
+            min_edge_weight=min_edge_weight,
+        )
+        result = mcp_tools.get_entity_graph(params)
+        if isinstance(result, dict) and "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+
+    @app.get("/api/documents/{doc_id}/graph/relationships")
+    def get_entity_relationships(
+        doc_id: str,
+        entity_type: str,
+        entity_value: str,
+        max_hops: int = 1,
+    ):
+        if not app.state.registry.get_document(doc_id):
+            raise HTTPException(status_code=404, detail="Document not found")
+        from src.mcp.schemas import GetEntityRelationshipsInput
+        from src.mcp import tools as mcp_tools
+        params = GetEntityRelationshipsInput(
+            doc_id=doc_id,
+            entity_type=entity_type,
+            entity_value=entity_value,
+            max_hops=max_hops,
+        )
+        result = mcp_tools.get_entity_relationships(params)
+        if isinstance(result, dict) and "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+
     @app.post("/api/search")
     def search(request: SearchRequest):
         doc_ids = [request.doc_id] if isinstance(request.doc_id, str) else request.doc_id
@@ -457,6 +501,7 @@ def create_app(
             rerank=request.rerank,
             dense_weight=request.dense_weight,
             sparse_weight=request.sparse_weight,
+            search_mode=request.search_mode,
         )
         return {"results": results}
 
@@ -489,7 +534,92 @@ def create_app(
             raise HTTPException(status_code=404, detail="Figure image not found")
         return FileResponse(img_path)
 
+    # ── Auto-Update Endpoints ────────────────────────────────────
+
+    @app.get("/api/health")
+    def health_check():
+        version = _read_local_version()
+        return {"status": "ok", "version": version}
+
+    @app.get("/api/version-check")
+    def version_check():
+        import urllib.request
+        local_version = _read_local_version()
+        # Check GitHub for latest VERSION file on main branch
+        repo = _get_github_repo()
+        if not repo:
+            return {"update_available": False, "local_version": local_version, "remote_version": local_version}
+        url = f"https://raw.githubusercontent.com/{repo}/main/VERSION"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "MiraDocs"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                remote_version = resp.read().decode().strip()
+        except Exception:
+            return {"update_available": False, "local_version": local_version, "remote_version": local_version}
+        update_available = remote_version != local_version
+        return {"update_available": update_available, "local_version": local_version, "remote_version": remote_version}
+
+    @app.post("/api/update")
+    def trigger_update():
+        import subprocess
+        root = Path(__file__).resolve().parent.parent.parent
+        script = root / "update.sh"
+        if not script.exists():
+            raise HTTPException(status_code=500, detail="update.sh not found")
+        # Spawn detached process
+        log_file = root / "data" / "update.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(
+            ["bash", str(script)],
+            start_new_session=True,
+            stdout=open(log_file, "w"),
+            stderr=subprocess.STDOUT,
+            cwd=str(root),
+        )
+        return {"status": "updating", "message": "Update started. App will restart shortly."}
+
+    @app.get("/api/update-status")
+    def update_status():
+        root = Path(__file__).resolve().parent.parent.parent
+        status_file = root / "data" / "update-status.json"
+        if not status_file.exists():
+            return {"status": "idle"}
+        try:
+            return json.loads(status_file.read_text())
+        except Exception:
+            return {"status": "idle"}
+
     return app
+
+
+def _read_local_version() -> str:
+    version_file = Path(__file__).resolve().parent.parent.parent / "VERSION"
+    try:
+        return version_file.read_text().strip()
+    except FileNotFoundError:
+        return "0.0.0"
+
+
+def _get_github_repo() -> str | None:
+    """Extract GitHub owner/repo from git remote origin URL."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5,
+            cwd=Path(__file__).resolve().parent.parent.parent,
+        )
+        url = result.stdout.strip()
+        # Handle: https://github.com/owner/repo.git or git@github.com:owner/repo.git
+        if "github.com" not in url:
+            return None
+        if url.startswith("git@"):
+            repo = url.split(":")[-1]
+        else:
+            repo = "/".join(url.split("github.com/")[-1:])
+        return repo.removesuffix(".git")
+    except Exception:
+        return None
 
 
 app = create_app()

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { UpdateNotification } from "../components/update-notification";
 
 export const metadata: Metadata = {
   title: "MiraDocs",
@@ -13,7 +14,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <UpdateNotification />
+      </body>
     </html>
   );
 }
