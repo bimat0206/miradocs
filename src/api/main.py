@@ -104,6 +104,7 @@ def create_app(
     def health():
         return {
             "status": "ok",
+            "version": _read_local_version(),
             "data_dir": str(app.state.data_dir),
             "registry": str(app.state.registry.db_path),
         }
@@ -550,11 +551,6 @@ def create_app(
 
     # ── Auto-Update Endpoints ────────────────────────────────────
 
-    @app.get("/api/health")
-    def health_check():
-        version = _read_local_version()
-        return {"status": "ok", "version": version}
-
     @app.get("/api/version-check")
     def version_check():
         import urllib.request
@@ -580,14 +576,13 @@ def create_app(
         script = root / "update.sh"
         if not script.exists():
             raise HTTPException(status_code=500, detail="update.sh not found")
-        # Spawn detached process
-        log_file = root / "data" / "update.log"
-        log_file.parent.mkdir(parents=True, exist_ok=True)
+        # Spawn detached process — update.sh writes its own log to data/update.log
+        (root / "data").mkdir(parents=True, exist_ok=True)
         subprocess.Popen(
             ["bash", str(script)],
             start_new_session=True,
-            stdout=open(log_file, "w"),
-            stderr=subprocess.STDOUT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             cwd=str(root),
         )
         return {"status": "updating", "message": "Update started. App will restart shortly."}

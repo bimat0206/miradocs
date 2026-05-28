@@ -14,6 +14,7 @@ LOG_FILE="data/update.log"
 STATUS_FILE="data/update-status.json"
 VENV_DIR=".venv"
 FRONTEND_DIR="frontend"
+API_PORT=8000
 
 write_status() {
   local status="$1"
@@ -55,16 +56,22 @@ log "Services stopped."
 # ── 3. Save current state for rollback ──
 PREV_COMMIT=$(git rev-parse HEAD)
 PREV_VERSION=$(cat VERSION 2>/dev/null || echo "unknown")
+STASHED=false
 log "Previous version: $PREV_VERSION ($PREV_COMMIT)"
 
 # ── 4. Pull latest from remote ──
 log "Pulling latest changes..."
 write_status "updating" "Pulling latest changes..."
 
-# Stash any local changes
+# Stash any locally modified tracked files so the pull can proceed cleanly.
+# Track whether we stashed so we can restore afterward.
 if ! git diff --quiet 2>/dev/null; then
   log "Stashing local changes..."
-  git stash --include-untracked >> "$LOG_FILE" 2>&1 || true
+  if git stash >> "$LOG_FILE" 2>&1; then
+    STASHED=true
+  else
+    log "WARNING: git stash failed — continuing anyway"
+  fi
 fi
 
 if ! git pull --ff-only >> "$LOG_FILE" 2>&1; then
@@ -75,6 +82,12 @@ if ! git pull --ff-only >> "$LOG_FILE" 2>&1; then
     log "FATAL: Could not update from remote."
     exit 1
   }
+fi
+
+# Restore stashed changes now that the pull is done
+if [[ "$STASHED" == "true" ]]; then
+  log "Restoring stashed local changes..."
+  git stash pop >> "$LOG_FILE" 2>&1 || log "WARNING: git stash pop failed — stash preserved as stash@{0}"
 fi
 
 NEW_VERSION=$(cat VERSION 2>/dev/null || echo "unknown")
@@ -106,7 +119,7 @@ bash start.sh >> "$LOG_FILE" 2>&1 &
 # Wait for API to become healthy
 log "Waiting for API to come up..."
 for i in $(seq 1 30); do
-  if curl -s http://localhost:8000/api/health > /dev/null 2>&1; then
+  if curl -s "http://localhost:${API_PORT}/api/health" > /dev/null 2>&1; then
     log "API is healthy."
     write_status "success" "Updated to $NEW_VERSION" "$NEW_VERSION"
     log "=== Update Complete ==="
