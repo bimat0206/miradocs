@@ -65,8 +65,36 @@ def search_document(
     rerank: bool = False,
     dense_weight: float = 0.7,
     sparse_weight: float = 0.3,
+    search_mode: str = "auto",
 ) -> list[dict]:
-    """Search with optional hybrid (dense+BM25) and reranking, enriched with page evidence."""
+    """Search with optional hybrid (dense+BM25) and reranking, enriched with page evidence.
+
+    When search_mode is 'graph_local', delegates to RetrievalService which seeds from
+    hybrid results and expands via the entity co-occurrence graph.
+    """
+    if search_mode == "graph_local":
+        from src.retrieval.retrieval_service import RetrievalService
+        filters: dict = {}
+        if doc_id:
+            filters["doc_id"] = doc_id
+        svc = RetrievalService()
+        output = svc.search_docs(query, top_k=top_k, filters=filters, search_mode="graph_local")
+        return [
+            {
+                "chunk_id": r.chunk_id,
+                "doc_id": r.doc_id,
+                "score": r.score,
+                "chunk_type": r.chunk_type,
+                "page_start": r.page_start,
+                "section_path": r.section_path,
+                "text": r.text,
+                "source_refs": r.source_refs,
+                "source_file": r.source_file,
+                "why_relevant": r.why_relevant,
+            }
+            for r in output.results
+        ]
+
     if hybrid:
         from src.indexing.hybrid_search import HybridSearchEngine
         engine = HybridSearchEngine()

@@ -15,6 +15,7 @@ ARTIFACTS = {
     "document": ("parsed", "document.json"),
     "markdown": ("parsed", "full_document.md"),
     "entities": ("parsed", "entities.json"),
+    "relations": ("parsed", "relations.json"),
     "chunks": ("parsed", "chunks.json"),
     "quality": ("reports", "quality_report.json"),
     "tables": ("tables", "tables_index.json"),

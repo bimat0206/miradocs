@@ -13,7 +13,7 @@ class SearchDocsInput(BaseModel):
     chunk_types: list[str] | None = Field(default=None, description="Filter by chunk types: child_text_chunk, table_chunk, figure_chunk, etc.")
     include_page_images: bool = Field(default=True, description="Include page image paths in results")
     include_tables: bool = Field(default=True, description="Include table references in results")
-    search_mode: str = Field(default="auto", description="Search mode: auto, semantic, keyword, hybrid")
+    search_mode: str = Field(default="auto", description="Search mode: auto, semantic, keyword, hybrid, graph_local")
 
 
 class SearchResultItem(BaseModel):
@@ -201,7 +201,7 @@ class PutCrossSearchInput(BaseModel):
     target_doc_id: str = Field(..., description="Second document ID")
     query: str = Field(..., description="Search query to run across both documents")
     top_k: int = Field(default=8, ge=1, le=20, description="Total results to return across both documents")
-    search_mode: str = Field(default="auto", description="Search mode: auto, semantic, keyword, hybrid")
+    search_mode: str = Field(default="auto", description="Search mode: auto, semantic, keyword, hybrid, graph_local")
     include_page_images: bool = Field(default=True, description="Include page image paths in results")
     include_tables: bool = Field(default=True, description="Include table references in results")
 
@@ -210,3 +210,80 @@ class PutCompareInput(BaseModel):
     source_doc_id: str = Field(..., description="Source document ID")
     target_doc_id: str = Field(..., description="Target document ID")
     mode: str = Field(default="auto", description="Compare mode or auto")
+
+
+# ─── get_entity_graph ─────────────────────────────────────────────────────────
+
+class GetEntityGraphInput(BaseModel):
+    doc_id: str = Field(..., description="Document ID to retrieve entity graph for")
+    entity_type: str | None = Field(
+        default=None,
+        description="Filter nodes by type: aws_service, cidr, environment, governance, azure_service",
+    )
+    min_edge_weight: int = Field(
+        default=1,
+        ge=1,
+        description="Only include edges with weight >= this value",
+    )
+
+
+class GraphNode(BaseModel):
+    id: str
+    type: str
+    value: str
+    page_first_seen: int = 0
+    occurrence_count: int = 0
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    weight: int = 1
+    relation: str = "co_occurs"
+    pages: list[int] = Field(default_factory=list)
+
+
+class GetEntityGraphOutput(BaseModel):
+    doc_id: str
+    node_count: int
+    edge_count: int
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+
+
+# ─── get_entity_relationships ─────────────────────────────────────────────────
+
+class GetEntityRelationshipsInput(BaseModel):
+    doc_id: str = Field(..., description="Document ID")
+    entity_type: str = Field(
+        ...,
+        description="Entity type: aws_service, cidr, environment, governance, azure_service",
+    )
+    entity_value: str = Field(
+        ...,
+        description="Entity value to look up, e.g. 'Transit Gateway'",
+    )
+    max_hops: int = Field(
+        default=1,
+        ge=1,
+        le=2,
+        description="Traversal depth (1 = direct neighbors only)",
+    )
+
+
+class EntityRelationship(BaseModel):
+    neighbor_id: str
+    neighbor_type: str
+    neighbor_value: str
+    edge_weight: int = 1
+    relation: str = "co_occurs"
+    pages: list[int] = Field(default_factory=list)
+
+
+class GetEntityRelationshipsOutput(BaseModel):
+    doc_id: str
+    entity_id: str
+    entity_type: str
+    entity_value: str
+    neighbor_count: int
+    relationships: list[EntityRelationship] = Field(default_factory=list)

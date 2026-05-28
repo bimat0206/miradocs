@@ -5,6 +5,8 @@ import type {
   CompareResult,
   CompareRun,
   DocumentRecord,
+  EntityGraphResponse,
+  EntityRelationshipsResponse,
   IndexStatus,
   PageImageMatchesResponse,
   PipelineRun,
@@ -105,8 +107,37 @@ export function search(docId: string | string[], query: string, topK = 5, option
       rerank: options?.rerank ?? false,
       dense_weight: options?.dense_weight ?? 0.7,
       sparse_weight: options?.sparse_weight ?? 0.3,
+      search_mode: options?.search_mode,
     }),
   });
+}
+
+export function getEntityGraph(
+  docId: string,
+  entityType?: string,
+  minEdgeWeight = 1,
+) {
+  const params = new URLSearchParams({ min_edge_weight: String(minEdgeWeight) });
+  if (entityType) params.set("entity_type", entityType);
+  return request<EntityGraphResponse>(
+    `/api/documents/${docId}/graph?${params}`,
+  );
+}
+
+export function getEntityRelationships(
+  docId: string,
+  entityType: string,
+  entityValue: string,
+  maxHops = 1,
+) {
+  const params = new URLSearchParams({
+    entity_type: entityType,
+    entity_value: entityValue,
+    max_hops: String(maxHops),
+  });
+  return request<EntityRelationshipsResponse>(
+    `/api/documents/${docId}/graph/relationships?${params}`,
+  );
 }
 
 export function detectCompareMode(sourceDocId: string, targetDocId: string) {

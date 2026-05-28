@@ -14,6 +14,7 @@ PIPELINE_STEPS = [
     ("tables_extracted", "Tables"),
     ("figures_extracted", "Figures"),
     ("entities_extracted", "Entities"),
+    ("relations_extracted", "Relations"),
     ("metadata_built", "Metadata"),
     ("quality_checked", "Quality Check"),
     ("chunks_created", "Chunks"),
@@ -41,6 +42,7 @@ def repair_completed_running_steps(
         "tables_extracted": lambda: (root / "tables" / doc_id / "tables_index.json").exists(),
         "figures_extracted": lambda: (root / "figures" / doc_id / "figures_index.json").exists(),
         "entities_extracted": lambda: (root / "parsed" / doc_id / "entities.json").exists(),
+        "relations_extracted": lambda: (root / "parsed" / doc_id / "relations.json").exists(),
         "metadata_built": lambda: (
             (root / "parsed" / doc_id / "doc_manifest.json").exists()
             and (root / "parsed" / doc_id / "document_structure.json").exists()
@@ -57,6 +59,23 @@ def repair_completed_running_steps(
         if has_artifact and has_artifact():
             registry.update_step(doc_id, step["step_name"], "success")
             repaired.append(step)
+
+    # Migration guard: insert relations_extracted row for old documents (9-step rows)
+    # so process_steps_complete can evaluate all 10 steps correctly.
+    with registry._conn() as conn:
+        existing_steps = {
+            row["step_name"]
+            for row in conn.execute(
+                "SELECT step_name FROM pipeline_steps WHERE doc_id = ?", (doc_id,)
+            ).fetchall()
+        }
+        if "relations_extracted" not in existing_steps:
+            has_artifact = (root / "parsed" / doc_id / "relations.json").exists()
+            conn.execute(
+                "INSERT OR IGNORE INTO pipeline_steps (doc_id, step_name, status) VALUES (?, ?, ?)",
+                (doc_id, "relations_extracted", "success" if has_artifact else "pending"),
+            )
+
     return repaired
 
 
@@ -74,6 +93,7 @@ def run_pipeline(
     from src.extraction.table_extractor import extract_tables
     from src.extraction.figure_extractor import extract_figures
     from src.extraction.entity_extractor import extract_entities
+    from src.extraction.relation_extractor import build_relations
     from src.normalization.metadata_builder import build_metadata
     from src.quality.quality_reporter import generate_quality_report
     from src.chunking.chunk_candidate_builder import build_chunks
@@ -175,10 +195,16 @@ def run_pipeline(
             5,
             lambda: extract_entities(pages_text, doc_id),
         )
+        run_step(
+            "relations_extracted",
+            "Relations",
+            6,
+            lambda: build_relations(entities, doc_id, pages_text),
+        )
         _, structure = run_step(
             "metadata_built",
             "Metadata",
-            6,
+            7,
             lambda: build_metadata(
                 doc_id, doc, parse_result, page_images, tables, figures, entities
             ),
@@ -186,7 +212,7 @@ def run_pipeline(
         report = run_step(
             "quality_checked",
             "Quality Check",
-            7,
+            8,
             lambda: generate_quality_report(
                 doc_id, parse_result["page_count"], pages_text,
                 page_images, tables, figures, parse_result,
@@ -196,7 +222,7 @@ def run_pipeline(
         chunks = run_step(
             "chunks_created",
             "Chunks",
-            8,
+            9,
             lambda: build_chunks(doc_id, pages_text, sections, tables, figures, entities, page_images),
         )
 
@@ -214,7 +240,7 @@ def run_pipeline(
         index_result = run_step(
             "indexed",
             "Index Document",
-            9,
+            10,
             run_indexing,
         )
 

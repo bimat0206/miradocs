@@ -42,7 +42,7 @@ def test_pipeline_steps_created(registry):
         file_size=1024, sha256="xyz789"
     )
     steps = registry.get_pipeline_status(doc_id)
-    assert len(steps) == 9
+    assert len(steps) == 10
     assert all(s["status"] == "pending" for s in steps)
 
 

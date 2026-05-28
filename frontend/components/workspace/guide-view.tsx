@@ -45,6 +45,8 @@ const mcpTools = [
   { name: "get_compare_run", desc: "Read an existing compare run and its findings." },
   { name: "put_cross_search", desc: "Side-by-side Cross Search across two documents." },
   { name: "put_compare", desc: "Create a deterministic compare run for two documents." },
+  { name: "get_entity_graph", desc: "Entity co-occurrence graph nodes and edges for a document." },
+  { name: "get_entity_relationships", desc: "Neighbors of a named entity (e.g. Transit Gateway) in the document graph." },
 ];
 
 const primaryPath = ["Library", "Process", "Tag", "Inspect", "Index", "Search"];

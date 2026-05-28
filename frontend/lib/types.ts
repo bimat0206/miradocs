@@ -118,6 +118,7 @@ export type SearchResult = {
   text: string;
   source_refs: Record<string, unknown>;
   source_file?: string;
+  why_relevant?: string;
   evidence?: {
     page_number: number;
     page_image: string | null;
@@ -136,6 +137,49 @@ export type SearchOptions = {
   rerank?: boolean;
   dense_weight?: number;
   sparse_weight?: number;
+  search_mode?: "auto" | "semantic" | "keyword" | "hybrid" | "graph_local";
+};
+
+export type GraphNode = {
+  id: string;
+  type: string;
+  value: string;
+  page_first_seen: number;
+  occurrence_count: number;
+};
+
+export type GraphEdge = {
+  source: string;
+  target: string;
+  weight: number;
+  relation: string;
+  pages: number[];
+};
+
+export type EntityGraphResponse = {
+  doc_id: string;
+  node_count: number;
+  edge_count: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+export type EntityRelationship = {
+  neighbor_id: string;
+  neighbor_type: string;
+  neighbor_value: string;
+  edge_weight: number;
+  relation: string;
+  pages: number[];
+};
+
+export type EntityRelationshipsResponse = {
+  doc_id: string;
+  entity_id: string;
+  entity_type: string;
+  entity_value: string;
+  neighbor_count: number;
+  relationships: EntityRelationship[];
 };
 
 export type PageImageMatch = {

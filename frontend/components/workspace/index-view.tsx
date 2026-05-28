@@ -128,6 +128,7 @@ export function IndexView({
               "quality",
               "chunks",
               "entities",
+              "relations",
               "markdown",
               "tables",
               "figures",
@@ -292,6 +293,17 @@ export function IndexView({
                         {selectedResult.text}
                       </div>
                     </div>
+
+                    {selectedResult.why_relevant && (
+                      <div>
+                        <p className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">
+                          Graph context
+                        </p>
+                        <div className="rounded-xl border border-violet-400/20 bg-violet-400/[0.06] p-3 text-xs leading-5 text-violet-200">
+                          {selectedResult.why_relevant}
+                        </div>
+                      </div>
+                    )}
 
                     {selectedResult.evidence?.nearby_text && (
                       <div>

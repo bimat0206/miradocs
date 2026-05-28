@@ -15,6 +15,8 @@ from src.mcp.schemas import (
     GetPipelineStatusInput, GetIndexStatusInput,
     DetectCompareModeInput, ListCompareRunsInput, GetCompareRunInput,
     PutCrossSearchInput, PutCompareInput,
+    GetEntityGraphInput, GetEntityGraphOutput, GraphNode, GraphEdge,
+    GetEntityRelationshipsInput, GetEntityRelationshipsOutput, EntityRelationship,
 )
 from src.retrieval.retrieval_service import RetrievalService
 
@@ -420,6 +422,101 @@ def put_compare(params: PutCompareInput) -> dict:
         )
     except CompareError as exc:
         return {"error": str(exc)}
+
+
+# ─── get_entity_graph ─────────────────────────────────────────────────────────
+
+def get_entity_graph(params: GetEntityGraphInput) -> GetEntityGraphOutput | dict:
+    """Return the persisted entity co-occurrence graph for a document."""
+    logger.info("get_entity_graph: doc_id=%s, entity_type=%s", params.doc_id, params.entity_type)
+    parsed_dir = get_data_dir() / "parsed" / params.doc_id
+    relations_path = parsed_dir / "relations.json"
+    if not relations_path.exists():
+        return {
+            "error": (
+                f"No entity graph found for document {params.doc_id}. "
+                "Re-index the document to build the graph."
+            )
+        }
+
+    data = _load_json(relations_path)
+    if not isinstance(data, dict):
+        return {"error": "relations.json is malformed"}
+
+    nodes_raw = data.get("nodes", [])
+    edges_raw = data.get("edges", [])
+
+    # Filter nodes by entity_type if requested
+    if params.entity_type:
+        valid_ids = {n["id"] for n in nodes_raw if n.get("type") == params.entity_type}
+        nodes_raw = [n for n in nodes_raw if n["id"] in valid_ids]
+        edges_raw = [
+            e for e in edges_raw
+            if e.get("source") in valid_ids or e.get("target") in valid_ids
+        ]
+
+    # Filter edges by min_edge_weight
+    edges_raw = [e for e in edges_raw if e.get("weight", 1) >= params.min_edge_weight]
+
+    nodes = [GraphNode(**{k: v for k, v in n.items() if k in GraphNode.model_fields}) for n in nodes_raw]
+    edges = [GraphEdge(**{k: v for k, v in e.items() if k in GraphEdge.model_fields}) for e in edges_raw]
+
+    return GetEntityGraphOutput(
+        doc_id=params.doc_id,
+        node_count=len(nodes),
+        edge_count=len(edges),
+        nodes=nodes,
+        edges=edges,
+    )
+
+
+# ─── get_entity_relationships ─────────────────────────────────────────────────
+
+def get_entity_relationships(params: GetEntityRelationshipsInput) -> GetEntityRelationshipsOutput | dict:
+    """Return all entities connected to a named entity in the document graph."""
+    logger.info(
+        "get_entity_relationships: doc_id=%s, %s::%s",
+        params.doc_id, params.entity_type, params.entity_value,
+    )
+    try:
+        from src.extraction.relation_extractor import load_graph, get_entity_neighbors
+    except ImportError:
+        return {"error": "relation_extractor module unavailable (networkx may not be installed)"}
+
+    graph = load_graph(params.doc_id)
+    if graph is None:
+        return {
+            "error": (
+                f"No entity graph found for document {params.doc_id}. "
+                "Re-index the document to build the graph."
+            )
+        }
+
+    neighbors = get_entity_neighbors(
+        graph, params.entity_type, params.entity_value, params.max_hops
+    )
+
+    entity_id = f"{params.entity_type}::{params.entity_value}"
+    relationships = [
+        EntityRelationship(
+            neighbor_id=n["id"],
+            neighbor_type=n["type"],
+            neighbor_value=n["value"],
+            edge_weight=int(n.get("edge_weight", 1)),
+            relation=n.get("relation", "co_occurs"),
+            pages=n.get("pages", []),
+        )
+        for n in neighbors
+    ]
+
+    return GetEntityRelationshipsOutput(
+        doc_id=params.doc_id,
+        entity_id=entity_id,
+        entity_type=params.entity_type,
+        entity_value=params.entity_value,
+        neighbor_count=len(relationships),
+        relationships=relationships,
+    )
 
 
 # ─── Helper ──────────────────────────────────────────────────────────────────

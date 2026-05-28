@@ -42,28 +42,38 @@ class RetrievalService:
         results: list[dict] = []
         mode_used = "fallback"
         warnings: list[str] = []
+        graph_annotations: dict[str, str] = {}
 
-        if search_mode in ("auto", "hybrid", "semantic"):
-            results, mode_used = self._try_vector_search(query, top_k, filters)
+        if search_mode == "graph_local":
+            results, mode_used, graph_annotations = self._graph_local_search(query, top_k, filters)
+        else:
+            if search_mode in ("auto", "hybrid", "semantic"):
+                results, mode_used = self._try_vector_search(query, top_k, filters)
 
-        if not results and search_mode in ("auto", "keyword"):
-            results = self._keyword_search(query, top_k, filters)
-            mode_used = "keyword" if results else "fallback"
-            if not results and search_mode == "keyword":
-                warnings.append("Keyword search returned no results")
+            if not results and search_mode in ("auto", "keyword"):
+                results = self._keyword_search(query, top_k, filters)
+                mode_used = "keyword" if results else "fallback"
+                if not results and search_mode == "keyword":
+                    warnings.append("Keyword search returned no results")
 
-        if not results and search_mode in ("auto", "hybrid", "semantic"):
-            # Final fallback
-            results = self._keyword_search(query, top_k, filters)
-            mode_used = "fallback"
-            if not results:
-                warnings.append("No results found in any search mode")
+            if not results and search_mode in ("auto", "hybrid", "semantic"):
+                # Final fallback
+                results = self._keyword_search(query, top_k, filters)
+                mode_used = "fallback"
+                if not results:
+                    warnings.append("No results found in any search mode")
 
         # Normalize results
         items = [
             normalize_chunk_to_result(chunk, rank=i + 1, max_text_chars=self._max_text)
             for i, chunk in enumerate(results[:top_k])
         ]
+
+        # Inject graph context annotations into why_relevant
+        if graph_annotations:
+            for item in items:
+                if item.chunk_id in graph_annotations:
+                    item.why_relevant = graph_annotations[item.chunk_id]
 
         # Strip page images/tables if not requested
         if not include_page_images:
@@ -171,3 +181,126 @@ class RetrievalService:
         except Exception:
             pass
         return results
+
+    # ─── Graph-local search ───────────────────────────────────────────────────
+
+    def _graph_local_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: dict | None,
+    ) -> tuple[list[dict], str, dict[str, str]]:
+        """Graph-local search: seed from hybrid, expand 1-hop via entity graph.
+
+        Returns:
+            (results, mode_used, graph_annotations)
+            graph_annotations maps chunk_id -> why_relevant string for graph-expanded chunks.
+        """
+        cfg = self._cfg.get("graph", {})
+        max_expanded = int(cfg.get("max_expanded_chunks", 5))
+
+        # Step 1: Seed phase — use hybrid search as base
+        seed_results, mode_used = self._try_vector_search(query, top_k * 2, filters)
+        if not seed_results:
+            seed_results = self._keyword_search(query, top_k, filters)
+        if not seed_results:
+            return [], "graph_local", {}
+
+        # Step 2: Collect seed entities
+        seed_entity_set: set[tuple[str, str]] = set()
+        for chunk in seed_results:
+            for etype, values in chunk.get("entities", {}).items():
+                if isinstance(values, list):
+                    for val in values:
+                        seed_entity_set.add((etype, str(val)))
+
+        if not seed_entity_set:
+            return seed_results[:top_k], "graph_local", {}
+
+        # Step 3: Load one graph per unique doc_id in seed results
+        try:
+            from src.extraction.relation_extractor import load_graph, get_entity_neighbors
+        except ImportError:
+            logger.warning("graph_local search: relation_extractor unavailable, falling back to seed results")
+            return seed_results[:top_k], "graph_local", {}
+
+        doc_ids = {c.get("doc_id", "") for c in seed_results if c.get("doc_id")}
+        graphs: dict[str, Any] = {}
+        for did in doc_ids:
+            g = load_graph(did)
+            if g is not None:
+                graphs[did] = g
+
+        if not graphs:
+            # No graphs built yet — return seed results, degrade gracefully
+            return seed_results[:top_k], "graph_local", {}
+
+        # Step 4: Expand 1-hop from seed entities
+        # neighbor_candidates: (doc_id, type, value, edge_weight)
+        seen_nbr: dict[tuple[str, str], float] = {}
+        for chunk in seed_results:
+            did = chunk.get("doc_id", "")
+            g = graphs.get(did)
+            if not g:
+                continue
+            for etype, values in chunk.get("entities", {}).items():
+                if not isinstance(values, list):
+                    continue
+                for val in values:
+                    nbrs = get_entity_neighbors(g, etype, str(val), max_hops=1)
+                    for nbr in nbrs:
+                        nbr_key = (nbr["type"], nbr["value"])
+                        if nbr_key not in seed_entity_set:
+                            weight = float(nbr.get("edge_weight", 1))
+                            if seen_nbr.get(nbr_key, -1.0) < weight:
+                                seen_nbr[nbr_key] = weight
+
+        # Step 5: Find chunks for top-N neighbor entities
+        top_nbrs = sorted(seen_nbr.items(), key=lambda x: -x[1])[:max_expanded]
+
+        seed_ids = {c.get("chunk_id", "") for c in seed_results}
+        doc_chunks_cache: dict[str, list[dict]] = {}
+        expanded_chunks: list[dict] = []
+
+        for (ntype, nval), edge_weight in top_nbrs:
+            for did in doc_ids:
+                if did not in doc_chunks_cache:
+                    doc_chunks_cache[did] = self._load_chunks_for_doc(did)
+                for chunk in doc_chunks_cache[did]:
+                    chunk_id = chunk.get("chunk_id", "")
+                    if chunk_id in seed_ids:
+                        continue
+                    chunk_ents = chunk.get("entities", {})
+                    if ntype in chunk_ents and nval in chunk_ents.get(ntype, []):
+                        expanded_chunks.append({
+                            **chunk,
+                            "score": edge_weight * 0.5,
+                            "doc_id": did,
+                            "_from_graph": True,
+                            "_graph_entity": f"{ntype}::{nval}",
+                        })
+                        seed_ids.add(chunk_id)  # prevent duplicates
+                        break  # one chunk per expanded entity is enough
+
+        # Step 6: Merge seed + expanded, deduplicated
+        merged = list(seed_results) + expanded_chunks
+
+        # Step 7: Build graph_annotations for expanded chunks
+        graph_annotations: dict[str, str] = {
+            chunk.get("chunk_id", ""): (
+                f"Added via graph expansion: entity '{chunk['_graph_entity']}' "
+                "co-occurs with a seed result entity."
+            )
+            for chunk in expanded_chunks
+            if chunk.get("chunk_id")
+        }
+
+        return merged, "graph_local", graph_annotations
+
+    def _load_chunks_for_doc(self, doc_id: str) -> list[dict]:
+        """Load chunks.json for a document. Returns [] on any error."""
+        path = get_data_dir() / "parsed" / doc_id / "chunks.json"
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []

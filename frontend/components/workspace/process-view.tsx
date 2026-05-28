@@ -65,7 +65,7 @@ export function ProcessView({
     {
       title: "Extraction",
       subtitle: "Asset & pattern extraction",
-      steps: ["tables_extracted", "figures_extracted", "entities_extracted"],
+      steps: ["tables_extracted", "figures_extracted", "entities_extracted", "relations_extracted"],
     },
     {
       title: "Enrich & Validate",
@@ -105,23 +105,28 @@ export function ProcessView({
       label: "Entities",
       desc: "Uses entity extraction (LLM/rule-based) to identify key AWS/GCP/Azure resources, subnets, and IPs.",
     },
-    metadata_built: {
+    relations_extracted: {
       order: "06",
+      label: "Relations",
+      desc: "Builds an entity co-occurrence graph linking AWS services, CIDRs, and governance terms found on adjacent pages. Powers graph_local search.",
+    },
+    metadata_built: {
+      order: "07",
       label: "Metadata",
       desc: "Assembles structural hierarchy, extracted entities, and asset references into a single unified JSON manifest.",
     },
     quality_checked: {
-      order: "07",
+      order: "08",
       label: "Quality Check",
       desc: "Performs heuristics-based validation on document extracts, verifying OCR confidence and raising warnings.",
     },
     chunks_created: {
-      order: "08",
+      order: "09",
       label: "Chunks",
       desc: "Splits extracted text into optimal semantic passages with overlap, anchoring them to layout page sections.",
     },
     indexed: {
-      order: "09",
+      order: "10",
       label: "Index Document",
       desc: "Generates vector embeddings using Ollama BGE-M3 model and upserts payloads to the Qdrant database.",
     },

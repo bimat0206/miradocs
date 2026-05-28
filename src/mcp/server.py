@@ -68,7 +68,7 @@ TOOLS = [
                 "chunk_types": {"type": "array", "items": {"type": "string"}, "description": "Filter by chunk types"},
                 "include_page_images": {"type": "boolean", "description": "Include page image paths", "default": True},
                 "include_tables": {"type": "boolean", "description": "Include table references", "default": True},
-                "search_mode": {"type": "string", "enum": ["auto", "semantic", "keyword", "hybrid"], "default": "auto"},
+                "search_mode": {"type": "string", "enum": ["auto", "semantic", "keyword", "hybrid", "graph_local"], "default": "auto"},
             },
             "required": ["query"],
         },
@@ -241,7 +241,7 @@ TOOLS = [
                 "target_doc_id": {"type": "string", "description": "Second document ID"},
                 "query": {"type": "string", "description": "Search query"},
                 "top_k": {"type": "integer", "description": "Total results (1-20, default 8)", "default": 8, "minimum": 1, "maximum": 20},
-                "search_mode": {"type": "string", "enum": ["auto", "semantic", "keyword", "hybrid"], "default": "auto"},
+                "search_mode": {"type": "string", "enum": ["auto", "semantic", "keyword", "hybrid", "graph_local"], "default": "auto"},
                 "include_page_images": {"type": "boolean", "description": "Include page image paths", "default": True},
                 "include_tables": {"type": "boolean", "description": "Include table references", "default": True},
             },
@@ -266,6 +266,61 @@ TOOLS = [
                 },
             },
             "required": ["source_doc_id", "target_doc_id"],
+        },
+    },
+    {
+        "name": "get_entity_graph",
+        "description": (
+            "Return the persisted entity co-occurrence graph for a document. "
+            "Nodes are architecture entities (AWS services, CIDRs, environments, governance terms, etc.). "
+            "Edges represent entities that appear together within the same page range. "
+            "Use to understand structural relationships before running graph_local search."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID"},
+                "entity_type": {
+                    "type": "string",
+                    "description": "Filter nodes by type: aws_service, cidr, environment, governance, azure_service",
+                },
+                "min_edge_weight": {
+                    "type": "integer",
+                    "description": "Minimum edge co-occurrence weight to include (default 1)",
+                    "default": 1,
+                    "minimum": 1,
+                },
+            },
+            "required": ["doc_id"],
+        },
+    },
+    {
+        "name": "get_entity_relationships",
+        "description": (
+            "Return all entities directly connected to a named entity in the document graph. "
+            "Use to explore what co-occurs with a specific service, CIDR, or governance term."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID"},
+                "entity_type": {
+                    "type": "string",
+                    "description": "Entity type: aws_service, cidr, environment, governance, azure_service",
+                },
+                "entity_value": {
+                    "type": "string",
+                    "description": "Entity value, e.g. 'Transit Gateway' or '10.0.0.0/16'",
+                },
+                "max_hops": {
+                    "type": "integer",
+                    "description": "Traversal depth (1=direct neighbors, 2=two hops)",
+                    "default": 1,
+                    "minimum": 1,
+                    "maximum": 2,
+                },
+            },
+            "required": ["doc_id", "entity_type", "entity_value"],
         },
     },
 ]
@@ -313,6 +368,8 @@ def handle_tools_call(id, params: dict) -> dict:
             "get_compare_run": (schemas.GetCompareRunInput, tools.get_compare_run),
             "put_cross_search": (schemas.PutCrossSearchInput, tools.put_cross_search),
             "put_compare": (schemas.PutCompareInput, tools.put_compare),
+            "get_entity_graph": (schemas.GetEntityGraphInput, tools.get_entity_graph),
+            "get_entity_relationships": (schemas.GetEntityRelationshipsInput, tools.get_entity_relationships),
         }
 
         if tool_name not in DISPATCH:
@@ -347,7 +404,9 @@ def handle_tools_call(id, params: dict) -> dict:
 
 HANDLERS = {
     "initialize": handle_initialize,
-    "notifications/initialized": lambda id, p: None,  # notification, no response
+    "notifications/initialized": lambda id, p: None,
+    "notifications/cancelled": lambda id, p: None,
+    "ping": lambda id, p: _success_response(id, {}),
     "tools/list": handle_tools_list,
     "tools/call": handle_tools_call,
 }

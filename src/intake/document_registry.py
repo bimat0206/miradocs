@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS compare_findings (
 PIPELINE_STEPS = [
     "parsed", "page_images", "tables_extracted",
     "figures_extracted", "entities_extracted",
+    "relations_extracted",
     "metadata_built", "quality_checked",
     "chunks_created", "indexed"
 ]

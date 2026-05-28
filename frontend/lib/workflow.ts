@@ -9,6 +9,7 @@ export const stepLabels: Record<string, string> = {
   tables_extracted: "Tables",
   figures_extracted: "Figures",
   entities_extracted: "Entities",
+  relations_extracted: "Relations",
   metadata_built: "Metadata",
   quality_checked: "Quality",
   chunks_created: "Chunks",

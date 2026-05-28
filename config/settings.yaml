@@ -50,3 +50,11 @@ retrieval:
   default_top_k: 8
   fallback_to_keyword: true
   max_result_text_chars: 1800
+
+graph:
+  use_llm_relations: false         # true = LLM-extracted predicates; false = co-occurrence only
+  co_occurrence_window_pages: 1    # pages within which two entities are considered co-occurring
+  max_expansion_hops: 1            # depth for graph_local search expansion
+  max_expanded_chunks: 5           # max extra chunks injected per query via graph walk
+  ollama_model: "llama3.2"         # used only when use_llm_relations: true
+  min_edge_weight: 1               # prune edges below this weight

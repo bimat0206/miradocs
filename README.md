@@ -46,20 +46,22 @@ MiraDocs parses your documents locally, builds a structured knowledge base, and 
 | **Table extraction** | Tables saved as CSV + Markdown |
 | **Figure extraction** | Cropped figure images per page |
 | **Entity detection** | AWS/Azure services, CIDRs, environments, governance terms |
+| **Local GraphRAG** | Per-document entity co-occurrence graph — powers `graph_local` search mode |
 | **Hybrid search** | Dense (BGE-M3) + sparse (BM25) with optional reranking |
+| **Graph-local search** | Seeds from hybrid results, expands via 1-hop entity graph neighbors |
 | **Side-by-side compare** | Two documents, keyword overlays, match navigation |
 | **Cross search** | Same query run across two documents simultaneously |
-| **MCP integration** | 14 tools exposed to Claude, ChatGPT, Gemini, Cursor, Windsurf, Codex |
+| **MCP integration** | 16 tools exposed to Claude, ChatGPT, Gemini, Cursor, Windsurf, Codex |
 | **100% local** | No cloud, no API keys required to run the pipeline |
-| **Artifact export** | manifest, structure, quality, chunks, entities, markdown, tables, figures |
+| **Artifact export** | manifest, structure, quality, chunks, entities, relations, markdown, tables, figures |
 
 ### Workspace views
 
 - **Library** — Upload, search, tag, select, and delete documents. Paginated with multi-select.
-- **Process** — Run the pipeline with live progress bar, ETA, and streaming logs.
+- **Process** — Run the 10-step pipeline with live progress bar, ETA, and streaming logs.
 - **Tag** — Add up to 5 custom tags per document, available before and after processing.
 - **Inspect** — Page images at full size, structure tree, quality signals, tables, and figures.
-- **Index & Search** — Index into Qdrant, then run hybrid search with page-level evidence.
+- **Index & Search** — Index into Qdrant, then run hybrid or graph-local search with page-level evidence and graph context annotations.
 - **Compare** — Side-by-side page evidence for two documents with keyword match navigation.
 
 ---
@@ -87,14 +89,14 @@ Clone the repo and run the one-shot setup script. It installs all dependencies, 
 
 **macOS / Linux**
 ```bash
-git clone https://github.com/your-username/miradocs.git
+git clone https://github.com/bimat0206/miradocs.git
 cd miradocs
 chmod +x setup.sh && ./setup.sh
 ```
 
 **Windows** (PowerShell, run as Administrator)
 ```powershell
-git clone https://github.com/your-username/miradocs.git
+git clone https://github.com/bimat0206/miradocs.git
 cd miradocs
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\setup.ps1
@@ -296,7 +298,7 @@ It should call `list_documents` and return your library.
 
 | Tool | What it does |
 |---|---|
-| `search_docs` | Semantic / keyword / hybrid search across indexed documents |
+| `search_docs` | Semantic / keyword / hybrid / `graph_local` search across indexed documents |
 | `list_documents` | List all documents with status, type, and page count |
 | `get_document_info` | Section structure, quality signals, chunk count, entity summary |
 | `get_page_evidence` | Full text, tables, figures, entities, and image path for a page |
@@ -310,6 +312,16 @@ It should call `list_documents` and return your library.
 | `get_compare_run` | Read an existing compare run and its findings |
 | `put_cross_search` | Side-by-side cross search across two documents |
 | `put_compare` | Create a deterministic compare run for two processed documents |
+| `get_entity_graph` | Entity co-occurrence graph (nodes + edges) for a document |
+| `get_entity_relationships` | All entities connected to a named entity in the document graph |
+
+#### Using `graph_local` search
+
+```
+search_docs(query="how does Transit Gateway connect to on-premises?", search_mode="graph_local")
+```
+
+`graph_local` seeds results from hybrid search, then walks the entity co-occurrence graph to inject up to 5 additional chunks whose entities are 1-hop neighbors of the seed entities. Each injected result includes a `why_relevant` explanation.
 
 ---
 
@@ -318,31 +330,31 @@ It should call `list_documents` and return your library.
 Edit `config/settings.yaml` to change runtime behaviour. The app picks up changes on restart.
 
 ```yaml
-# ── Parsing ─────────────────────────────────────────────────
+# -- Parsing ─────────────────────────────────────────────────
 parsing:
   primary_parser: "docling"     # "docling" | "pymupdf"
   fallback_parser: "pymupdf"
   page_image_dpi: 150           # increase for sharper images (uses more disk)
   ocr_enabled: true             # disable to skip OCR on scanned pages
 
-# ── Embeddings ───────────────────────────────────────────────
+# -- Embeddings ───────────────────────────────────────────────
 embedding:
   provider: "ollama"
   model: "bge-m3"               # 1024-dim dense embeddings
   ollama_url: "http://localhost:11434"
 
-# ── Vector Index ─────────────────────────────────────────────
+# -- Vector Index ─────────────────────────────────────────────
 indexing:
   default_store: "qdrant"
   qdrant_path: "data/indexes/qdrant"
   collection_name: "architecture_docs"
 
-# ── Chunking ─────────────────────────────────────────────────
+# -- Chunking ─────────────────────────────────────────────────
 chunking:
   max_chunk_tokens: 512         # reduce for more granular retrieval
   overlap_tokens: 50
 
-# ── Search ───────────────────────────────────────────────────
+# -- Search ───────────────────────────────────────────────────
 search:
   dense_weight: 0.7             # hybrid score = dense*0.7 + sparse*0.3
   sparse_weight: 0.3
@@ -351,10 +363,19 @@ search:
   default_top_k: 10
   rerank_top_k: 5               # candidates passed to reranker
 
-# ── Entity Extraction ────────────────────────────────────────
+# -- Entity Extraction ────────────────────────────────────────
 entity_extraction:
   use_llm: true                 # false = regex only (faster); true = Ollama enrichment
   ollama_model: "llama3.2"
+
+# -- Graph (local GraphRAG) ───────────────────────────────────
+graph:
+  use_llm_relations: false      # true = LLM-extracted predicates; false = co-occurrence only
+  co_occurrence_window_pages: 1 # pages within which two entities are considered co-occurring
+  max_expansion_hops: 1         # depth for graph_local expansion
+  max_expanded_chunks: 5        # max extra chunks injected per query via graph walk
+  ollama_model: "llama3.2"      # used only when use_llm_relations: true
+  min_edge_weight: 1            # prune edges below this co-occurrence count
 ```
 
 ### Common changes
@@ -367,6 +388,9 @@ entity_extraction:
 | Keyword-only search fallback | `retrieval.fallback_to_keyword: true` |
 | Disable reranking | `search.rerank_enabled: false` |
 | Different embedding model | `embedding.model: "nomic-embed-text"` (then `ollama pull nomic-embed-text`) |
+| Wider graph co-occurrence | `graph.co_occurrence_window_pages: 2` |
+| More graph-expanded chunks | `graph.max_expanded_chunks: 10` |
+| LLM-extracted graph relations | `graph.use_llm_relations: true` |
 
 > After changing embedding model or chunking settings, delete `data/indexes/qdrant/` and re-index your documents.
 
@@ -375,44 +399,55 @@ entity_extraction:
 ## Architecture
 
 ```
-┌────────────┐     ┌────────────┐     ┌────────────┐
-│  Next.js   │────▶│  FastAPI   │────▶│  Pipeline  │
-│ workspace  │     │  services  │     │  modules   │
-└────────────┘     └────────────┘     └─────┬──────┘
-                                            │
-                   ┌────────────────────────┼─────────────────────┐
-                   ▼                        ▼                     ▼
-             ┌──────────┐            ┌────────────┐        ┌──────────┐
-             │  Docling │            │  PyMuPDF   │        │  SQLite  │
-             │ (parser) │            │  (images)  │        │ registry │
-             └──────────┘            └────────────┘        └──────────┘
-                                            │
-                                            ▼
-                                      ┌──────────┐
-                                      │  Qdrant  │
-                                      │  local   │
-                                      └──────────┘
-                                            │
-                                    ┌───────┴───────┐
-                                    ▼               ▼
-                              MCP stdio         Browser UI
-                         (AI clients)       (localhost:3000)
++------------+     +------------+     +------------+
+|  Next.js   |---->|  FastAPI   |---->|  Pipeline  |
+| workspace  |     |  services  |     |  modules   |
++------------+     +------------+     +-----+------+
+                                            |
+                   +------------------------+-----------------------+
+                   v                        v                       v
+             +----------+            +------------+          +----------+
+             |  Docling  |            |  PyMuPDF   |          |  SQLite  |
+             | (parser)  |            |  (images)  |          | registry |
+             +----------+            +------------+          +----------+
+                                            |
+                          +-----------------+----------------+
+                          v                                  v
+                    +----------+                      +----------+
+                    |  Qdrant  |                      | NetworkX |
+                    |  local   |                      |  graph   |
+                    +----------+                      +----------+
+                          |                                  |
+                  +-------+--------+              graph_local search
+                  v                v              (1-hop entity expand)
+            MCP stdio         Browser UI
+         (AI clients)     (localhost:3000)
 ```
 
 ### Pipeline steps
 
-| Step | Output |
-|---|---|
-| 1. Upload | Raw file registered in SQLite |
-| 2. Parse | `document.json`, `full_document.md` |
-| 3. Page images | `page_NNNN.png` per page |
-| 4. Tables | CSV + Markdown per table |
-| 5. Figures | Cropped PNG per figure |
-| 6. Entities | `entities.json` |
-| 7. Metadata | `doc_manifest.json`, `document_structure.json` |
-| 8. Quality | `quality_report.json` |
-| 9. Chunks | `chunks.json` |
-| 10. Index | Qdrant collection |
+| Step | Name | Output |
+|---|---|---|
+| 1 | Upload | Raw file registered in SQLite |
+| 2 | Parse | `document.json`, `full_document.md` |
+| 3 | Page images | `page_NNNN.png` per page |
+| 4 | Tables | CSV + Markdown per table |
+| 5 | Figures | Cropped PNG per figure |
+| 6 | Entities | `entities.json` |
+| 7 | **Relations** | **`relations.json` — entity co-occurrence graph (NetworkX)** |
+| 8 | Metadata | `doc_manifest.json`, `document_structure.json` |
+| 9 | Quality | `quality_report.json` |
+| 10 | Chunks | `chunks.json` |
+| 11 | Index | Qdrant collection |
+
+### Local GraphRAG
+
+MiraDocs builds a lightweight per-document entity graph during the **Relations** step. No global summarisation, no external graph database.
+
+- **Nodes** — architecture entities: AWS/Azure services, CIDRs, environments, governance terms
+- **Edges** — weighted co-occurrence: two entities are linked if they appear within `co_occurrence_window_pages` pages of each other
+- **Stored** — as `data/parsed/{doc_id}/relations.json` (JSON-serialisable, portable)
+- **`graph_local` search** — seeds from hybrid search, expands 1 hop via the graph, injects up to `max_expanded_chunks` extra results, annotates each with a `why_relevant` explanation
 
 ---
 
@@ -441,8 +476,8 @@ You can also update manually at any time:
 Bump the `VERSION` file on your main branch:
 
 ```bash
-echo "1.1.0" > VERSION
-git add VERSION && git commit -m "release: v1.1.0" && git push
+echo "1.2.0" > VERSION
+git add VERSION && git commit -m "release: v1.2.0" && git push
 ```
 
 All running instances will see the update popup on next page load.
@@ -461,3 +496,5 @@ All running instances will see the update popup on next page load.
 | MCP server not found by client | Check `cwd` in your client config points to the project root |
 | No search results | Ensure documents are indexed — run Index from the workspace UI first |
 | Windows MCP path error | Use `.venv\Scripts\python.exe` and backslashes in `cwd` |
+| `graph_local` returns no graph annotations | Run the pipeline again — Relations step must complete to build `relations.json` |
+| `networkx` import error | `pip install networkx>=3.3` |
