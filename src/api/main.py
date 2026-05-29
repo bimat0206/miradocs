@@ -87,7 +87,7 @@ def create_app(
     index_adapter_factory: Callable[[], Any] | None = None,
     job_manager: JobManager | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="MiraDocs API", version="1.0.0")
+    app = FastAPI(title="MiraDocs API", version=_read_local_version())
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],

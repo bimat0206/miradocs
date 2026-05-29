@@ -13,3 +13,4 @@ data/registry.db
 *.egg-info/
 data/update.log
 data/update-status.json
+CHANGELOG.md
