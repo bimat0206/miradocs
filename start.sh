@@ -41,6 +41,75 @@ WEB_PID=""
 ERRORS=0
 WARNINGS=0
 
+github_repo_from_origin() {
+    local url repo
+    if ! url=$(git remote get-url origin 2>/dev/null); then
+        return 1
+    fi
+
+    case "$url" in
+        git@github.com:*) repo="${url#git@github.com:}" ;;
+        *github.com/*) repo="${url#*github.com/}" ;;
+        *) return 1 ;;
+    esac
+
+    repo="${repo%.git}"
+    if [[ -z "$repo" || "$repo" == "$url" ]]; then
+        return 1
+    fi
+    echo "$repo"
+}
+
+remote_main_version() {
+    local repo="$1"
+    local url="https://raw.githubusercontent.com/${repo}/main/VERSION"
+    if ! command -v curl >/dev/null 2>&1; then
+        return 1
+    fi
+    curl -fsSL --max-time 5 "$url" 2>/dev/null | tr -d '[:space:]'
+}
+
+check_startup_update() {
+    if [[ "${MIRADOCS_SKIP_START_UPDATE:-}" == "1" ]]; then
+        return 0
+    fi
+    if [[ ! -f VERSION ]]; then
+        return 0
+    fi
+
+    local local_version repo remote_version
+    local_version="$(tr -d '[:space:]' < VERSION)"
+    if [[ -z "$local_version" ]]; then
+        return 0
+    fi
+
+    if ! repo="$(github_repo_from_origin)"; then
+        return 0
+    fi
+    if ! remote_version="$(remote_main_version "$repo")"; then
+        return 0
+    fi
+    if [[ -z "$remote_version" || "$remote_version" == "$local_version" ]]; then
+        return 0
+    fi
+
+    header "Startup Update"
+    info "Update available: ${local_version} -> ${remote_version}"
+    info "Running update.sh before launching MiraDocs"
+    if [[ ! -f update.sh ]]; then
+        warn "update.sh not found; continuing normal startup"
+        return 0
+    fi
+
+    MIRADOCS_SKIP_START_UPDATE=1 bash update.sh
+    exit 0
+}
+
+check_startup_update
+if [[ "${MIRADOCS_START_UPDATE_ONLY:-}" == "1" ]]; then
+    exit 0
+fi
+
 cleanup() {
     echo
     info "Shutting down MiraDocs …"

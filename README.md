@@ -457,11 +457,11 @@ MiraDocs checks for new versions on startup by comparing the local `VERSION` fil
 
 ### How it works
 
-1. App loads → frontend calls `/api/version-check`
-2. If a newer version exists → a popup appears: *"New version available. Update now?"*
-3. User clicks **Yes** → backend spawns a detached update process
-4. The update script stops services, pulls changes, installs dependencies (if changed), and restarts the stack
-5. Frontend polls `/api/health` until the app comes back → auto-reloads the page
+1. `./start.sh` checks GitHub `main/VERSION` before launching services.
+2. If a newer version exists, startup runs `update.sh` automatically and lets the update process restart the stack.
+3. Already-running app sessions still call `/api/version-check`; if a newer version appears, users can trigger `/api/update` from the popup.
+4. The update script stops services, stashes tracked local changes, pulls changes, installs dependencies (if changed), restores the stash, and restarts the stack.
+5. Update status and logs are written to `data/update-status.json` and `data/update.log`; the frontend polls `/api/update-status` until the app comes back.
 
 ### Manual update
 

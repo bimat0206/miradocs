@@ -114,8 +114,8 @@ fi
 log "Restarting services..."
 write_status "updating" "Restarting services..." "$NEW_VERSION"
 
-# Start using the same start.sh mechanism
-bash start.sh >> "$LOG_FILE" 2>&1 &
+# Start using the same start.sh mechanism without re-entering startup update.
+MIRADOCS_SKIP_START_UPDATE=1 bash start.sh >> "$LOG_FILE" 2>&1 &
 
 # Wait for API to become healthy
 log "Waiting for API to come up..."
