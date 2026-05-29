@@ -386,6 +386,89 @@ def test_blacklisted_device_skipped_on_subsequent_calls(monkeypatch, tmp_path):
     assert convert_device_names == ["MPS", "CPU", "CPU", "CPU"]
 
 
+def test_any_exception_on_mps_triggers_cpu_fallback(monkeypatch, tmp_path):
+    """ANY exception on a non-CPU device triggers CPU retry — not just known patterns.
+
+    This covers the case where Docling wraps the inner error in a ConversionError
+    whose str() doesn't contain the original MPS/CUDA message.
+    """
+    captured: dict = {}
+
+    class FakeAcceleratorDevice:
+        CPU = types.SimpleNamespace(name="CPU")
+        MPS = types.SimpleNamespace(name="MPS")
+
+    class FakeAcceleratorOptions:
+        def __init__(self, *, device, **kwargs):
+            self.device = device
+
+    class FakePdfPipelineOptions:
+        def __init__(self, *, accelerator_options):
+            self.accelerator_options = accelerator_options
+
+    class FakePdfFormatOption:
+        def __init__(self, *, pipeline_options):
+            self.pipeline_options = pipeline_options
+
+    class FakeDocument:
+        def export_to_markdown(self):
+            return "# OK"
+
+        def export_to_dict(self):
+            return {"pages": {"1": {}}}
+
+    class FakeResult:
+        document = FakeDocument()
+
+    class FakeConverter:
+        def __init__(self, **kwargs):
+            captured.setdefault("init_devices", []).append(
+                kwargs["format_options"]["pdf"].pipeline_options.accelerator_options.device
+            )
+            self._device = captured["init_devices"][-1]
+
+        def convert(self, file_path):
+            captured.setdefault("convert_devices", []).append(self._device)
+            if self._device.name == "MPS":
+                # Simulate a wrapped ConversionError with NO MPS substring at all
+                raise RuntimeError("Conversion failed for: doc.pdf with status: FAILURE")
+            return FakeResult()
+
+    converter_module = types.ModuleType("docling.document_converter")
+    converter_module.DocumentConverter = FakeConverter
+    converter_module.PdfFormatOption = FakePdfFormatOption
+    monkeypatch.setitem(sys.modules, "docling.document_converter", converter_module)
+
+    base_module = types.ModuleType("docling.datamodel.base_models")
+    base_module.InputFormat = types.SimpleNamespace(PDF="pdf")
+    monkeypatch.setitem(sys.modules, "docling.datamodel.base_models", base_module)
+
+    pipeline_module = types.ModuleType("docling.datamodel.pipeline_options")
+    pipeline_module.PdfPipelineOptions = FakePdfPipelineOptions
+    monkeypatch.setitem(sys.modules, "docling.datamodel.pipeline_options", pipeline_module)
+
+    acc_module = types.ModuleType("docling.datamodel.accelerator_options")
+    acc_module.AcceleratorDevice = FakeAcceleratorDevice
+    acc_module.AcceleratorOptions = FakeAcceleratorOptions
+    monkeypatch.setitem(sys.modules, "docling.datamodel.accelerator_options", acc_module)
+    monkeypatch.setitem(sys.modules, "docling", types.ModuleType("docling"))
+
+    monkeypatch.setattr(
+        docling_parser_mod,
+        "get_config",
+        lambda: {"parsing": {"accelerator_device": "mps", "accelerator_num_threads": 0}},
+    )
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    result = parse_with_docling(pdf)
+
+    assert result["parser"] == "docling"
+    assert [d.name for d in captured["convert_devices"]] == ["MPS", "CPU"]
+    assert "MPS" in docling_parser_mod._FAILED_DEVICES
+
+
 def test_cpu_failures_are_not_retried(monkeypatch, tmp_path):
     """When the active device is already CPU, an unrelated TypeError is raised, not silently retried."""
     captured: dict = {}

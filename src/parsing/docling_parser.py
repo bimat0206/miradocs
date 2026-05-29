@@ -82,12 +82,14 @@ def _blacklist_device(device) -> None:
 # the converter cache, and retry once on CPU. The list errs on the side of
 # being slightly broad: if a real bug ever matches one of these strings on
 # CPU we'll still raise it — we only re-route when the active device != CPU.
+# Substrings historically seen in accelerator failures — kept for logging
+# context only. The retry decision no longer depends on matching these.
 _ACCELERATOR_FAILURE_PATTERNS = (
     "mps framework doesn't support float64",
     "cannot convert a mps tensor to float64",
-    "the mps framework doesn",            # broad MPS limitation cover
-    "cuda out of memory",                  # OOM can sometimes be cleared by CPU fallback
-    "cuda error",                          # broad CUDA driver/runtime errors
+    "the mps framework doesn",
+    "cuda out of memory",
+    "cuda error",
 )
 
 
@@ -155,16 +157,21 @@ def parse_with_docling(file_path: Path) -> dict[str, Any]:
 
 
 def _should_retry_on_cpu(exc: Exception, active_device) -> bool:
-    """Return True if exc looks like an accelerator incompatibility worth retrying on CPU."""
+    """Return True if the failure should be retried on CPU.
+
+    Strategy: if the active device is anything other than CPU, ALWAYS retry.
+    This is unconditional because:
+    - Docling wraps inner errors in ConversionError, which may or may not
+      propagate the original message into str(exc).
+    - The set of possible MPS/CUDA incompatibilities is open-ended (float64,
+      unsupported ops, driver errors, OOM, etc.).
+    - Retrying on CPU is cheap (one extra parse) and always safe.
+    - When the active device IS CPU, we never retry — the real error surfaces.
+    """
     name = getattr(active_device, "name", str(active_device)).upper()
     if name == "CPU":
-        # Already on CPU — no fallback target left, surface the real error.
         return False
-
-    msg = (str(exc) or "").lower()
-    if not msg:
-        return False
-    return any(pat in msg for pat in _ACCELERATOR_FAILURE_PATTERNS)
+    return True
 
 
 # ─── Converter construction ──────────────────────────────────────────────────
