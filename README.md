@@ -87,19 +87,11 @@ The setup script installs everything automatically. If you prefer to install man
 
 Clone the repo and run the one-shot setup script. It installs all dependencies, pulls Ollama models, and initialises the data directories.
 
-**macOS / Linux**
+**All platforms (macOS / Linux / Windows)**
 ```bash
 git clone https://github.com/bimat0206/miradocs.git
 cd miradocs
-chmod +x setup.sh && ./setup.sh
-```
-
-**Windows** (PowerShell, run as Administrator)
-```powershell
-git clone https://github.com/bimat0206/miradocs.git
-cd miradocs
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\setup.ps1
+python3 setup.py
 ```
 
 The setup script:
@@ -116,14 +108,8 @@ The setup script:
 
 ## Run
 
-**macOS / Linux**
 ```bash
-./start.sh
-```
-
-**Windows** — requires [Git Bash](https://git-scm.com/download/win) or WSL:
-```bash
-./start.sh
+python3 start.py
 ```
 
 Once running:
@@ -142,27 +128,16 @@ Press `Ctrl+C` to stop all services cleanly.
 
 Remove installed packages and generated files without touching your documents.
 
-**macOS / Linux**
 ```bash
-./cleanup.sh                # interactive menu
-./cleanup.sh --packages     # remove .venv + node_modules only
-./cleanup.sh --cache        # remove .next, __pycache__, .pytest_cache
-./cleanup.sh --all          # packages + cache (safe reset — re-run setup.sh after)
-./cleanup.sh --data         # delete all user documents and parsed data (irreversible)
-./cleanup.sh --full         # everything
+python3 cleanup.py              # interactive menu
+python3 cleanup.py --packages   # remove .venv + node_modules only
+python3 cleanup.py --cache      # remove .next, __pycache__, .pytest_cache
+python3 cleanup.py --all        # packages + cache (safe reset — re-run setup.py after)
+python3 cleanup.py --data       # delete all user documents and parsed data (irreversible)
+python3 cleanup.py --full       # everything
 ```
 
-**Windows**
-```powershell
-.\cleanup.ps1               # interactive menu
-.\cleanup.ps1 -Packages     # remove .venv + node_modules only
-.\cleanup.ps1 -Cache        # remove .next, __pycache__, .pytest_cache
-.\cleanup.ps1 -All          # packages + cache
-.\cleanup.ps1 -Data         # delete all user documents and parsed data (irreversible)
-.\cleanup.ps1 -Full         # everything
-```
-
-> `--data` / `-Data` requires typing `delete` at the confirmation prompt — it wipes all uploaded files, parsed output, page images, indexes, and the registry database.
+> `--data` requires typing `delete` at the confirmation prompt — it wipes all uploaded files, parsed output, page images, indexes, and the registry database.
 
 ---
 
@@ -457,7 +432,7 @@ MiraDocs checks for new versions on startup by comparing the local `VERSION` fil
 
 ### How it works
 
-1. `./start.sh` delegates to the Python launcher in `start.py`, which checks GitHub `main/VERSION` before launching services.
+1. `python3 start.py` checks GitHub `main/VERSION` before launching services.
 2. If a newer version exists, `start.py` runs its integrated update flow and then continues startup from the refreshed launcher.
 3. Already-running app sessions still call `/api/version-check`; if a newer version appears, users can trigger `/api/update` from the popup.
 4. The Python update flow stops services, stashes tracked local changes, pulls changes, installs dependencies (if changed), restores the stash, and restarts the stack.
@@ -468,10 +443,8 @@ MiraDocs checks for new versions on startup by comparing the local `VERSION` fil
 You can also update manually at any time:
 
 ```bash
-./update.sh
+python3 start.py update
 ```
-
-`update.sh` is a compatibility wrapper for `python3 start.py update`.
 
 ### Releasing a new version
 
