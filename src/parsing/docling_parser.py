@@ -38,6 +38,15 @@ logger = logging.getLogger(__name__)
 _CONVERTER_CACHE: dict[tuple, Any] = {}
 _CONVERTER_LOCK = threading.Lock()
 
+# Process-level blacklist of accelerator device *names* (e.g. {"MPS"}) that
+# raised a hard incompatibility during convert(). Once a device is blacklisted
+# for the current process, neither auto-detection nor explicit config will
+# select it again, so subsequent documents skip the doomed retry. This is
+# specifically how we handle the transformers + Apple Silicon MPS float64
+# issue in models like RT-DETR v2 used by Docling for layout detection.
+_FAILED_DEVICES: set[str] = set()
+_FAILED_DEVICES_LOCK = threading.Lock()
+
 
 def reset_converter_cache() -> None:
     """Clear the cached DocumentConverter. Intended for tests and config reloads."""
@@ -45,39 +54,134 @@ def reset_converter_cache() -> None:
         _CONVERTER_CACHE.clear()
 
 
+def reset_failed_devices() -> None:
+    """Clear the failed-device blacklist. Intended for tests."""
+    with _FAILED_DEVICES_LOCK:
+        _FAILED_DEVICES.clear()
+
+
+def _is_device_blacklisted(device) -> bool:
+    """Return True if this device name has been recorded as failing this process."""
+    name = getattr(device, "name", str(device)).upper()
+    with _FAILED_DEVICES_LOCK:
+        return name in _FAILED_DEVICES
+
+
+def _blacklist_device(device) -> None:
+    """Record a device as failing for the rest of this process."""
+    name = getattr(device, "name", str(device)).upper()
+    with _FAILED_DEVICES_LOCK:
+        _FAILED_DEVICES.add(name)
+
+
 # ─── Public API ──────────────────────────────────────────────────────────────
 
+# Substrings used to detect a hard accelerator incompatibility coming from
+# upstream code (transformers, torch, Docling models). When we see one of
+# these *and* the active device is non-CPU, we blacklist the device, reset
+# the converter cache, and retry once on CPU. The list errs on the side of
+# being slightly broad: if a real bug ever matches one of these strings on
+# CPU we'll still raise it — we only re-route when the active device != CPU.
+_ACCELERATOR_FAILURE_PATTERNS = (
+    "mps framework doesn't support float64",
+    "cannot convert a mps tensor to float64",
+    "the mps framework doesn",            # broad MPS limitation cover
+    "cuda out of memory",                  # OOM can sometimes be cleared by CPU fallback
+    "cuda error",                          # broad CUDA driver/runtime errors
+)
+
+
 def parse_with_docling(file_path: Path) -> dict[str, Any]:
-    """Parse document using Docling. Returns structured result."""
-    converter = _get_or_create_converter()
+    """Parse document using Docling. Returns structured result.
 
-    logger.info("Parsing with Docling: %s", file_path)
-    result = converter.convert(str(file_path))
-    doc = result.document
+    On hard accelerator incompatibilities (e.g. transformers requiring
+    ``float64`` on Apple Silicon MPS) the failing device is blacklisted for
+    the rest of the process, the converter cache is rebuilt on CPU, and the
+    parse is retried once. The retry is silent to the caller — they get a
+    successful result or the original exception.
+    """
+    last_exc: Exception | None = None
 
-    markdown = doc.export_to_markdown()
-    doc_dict = doc.export_to_dict()
+    for attempt in range(2):
+        converter, active_device = _get_or_create_converter_with_device()
 
-    sections = _extract_sections(doc_dict)
-    tables = _extract_tables(doc_dict)
-    figures = _extract_figures(doc_dict)
-    page_count = _get_page_count(doc_dict)
+        logger.info(
+            "Parsing with Docling: %s (device=%s, attempt=%d)",
+            file_path,
+            getattr(active_device, "name", active_device),
+            attempt + 1,
+        )
 
-    return {
-        "markdown": markdown,
-        "doc_dict": doc_dict,
-        "sections": sections,
-        "tables": tables,
-        "figures": figures,
-        "page_count": page_count,
-        "parser": "docling",
-    }
+        try:
+            result = converter.convert(str(file_path))
+        except Exception as exc:
+            if not _should_retry_on_cpu(exc, active_device):
+                raise
+            last_exc = exc
+            logger.warning(
+                "Docling convert failed on device=%s with %s: %s — "
+                "blacklisting device and retrying on CPU.",
+                getattr(active_device, "name", active_device),
+                type(exc).__name__,
+                exc,
+            )
+            _blacklist_device(active_device)
+            reset_converter_cache()
+            continue
+
+        doc = result.document
+        markdown = doc.export_to_markdown()
+        doc_dict = doc.export_to_dict()
+
+        sections = _extract_sections(doc_dict)
+        tables = _extract_tables(doc_dict)
+        figures = _extract_figures(doc_dict)
+        page_count = _get_page_count(doc_dict)
+
+        return {
+            "markdown": markdown,
+            "doc_dict": doc_dict,
+            "sections": sections,
+            "tables": tables,
+            "figures": figures,
+            "page_count": page_count,
+            "parser": "docling",
+        }
+
+    # Reached only if the second (CPU) attempt also tripped the retry path,
+    # which shouldn't happen since CPU is excluded from _should_retry_on_cpu.
+    assert last_exc is not None
+    raise last_exc
+
+
+def _should_retry_on_cpu(exc: Exception, active_device) -> bool:
+    """Return True if exc looks like an accelerator incompatibility worth retrying on CPU."""
+    name = getattr(active_device, "name", str(active_device)).upper()
+    if name == "CPU":
+        # Already on CPU — no fallback target left, surface the real error.
+        return False
+
+    msg = (str(exc) or "").lower()
+    if not msg:
+        return False
+    return any(pat in msg for pat in _ACCELERATOR_FAILURE_PATTERNS)
 
 
 # ─── Converter construction ──────────────────────────────────────────────────
 
 def _get_or_create_converter():
-    """Return a cached DocumentConverter, creating it on first use."""
+    """Return a cached DocumentConverter, creating it on first use.
+
+    Backward-compatible wrapper: returns only the converter, dropping the
+    active device. Internal callers that need the device should use
+    :func:`_get_or_create_converter_with_device`.
+    """
+    converter, _device = _get_or_create_converter_with_device()
+    return converter
+
+
+def _get_or_create_converter_with_device():
+    """Return ``(converter, active_device)`` pair, building if not cached."""
     from docling.datamodel.accelerator_options import (
         AcceleratorDevice,
         AcceleratorOptions,
@@ -99,7 +203,7 @@ def _get_or_create_converter():
     with _CONVERTER_LOCK:
         cached = _CONVERTER_CACHE.get(cache_key)
         if cached is not None:
-            return cached
+            return cached, device
 
         accelerator_options = _build_accelerator_options(
             AcceleratorOptions, device=device, num_threads=num_threads
@@ -117,7 +221,7 @@ def _get_or_create_converter():
             "Initialized Docling DocumentConverter (device=%s, num_threads=%s)",
             getattr(device, "name", device), num_threads or "library-default",
         )
-        return converter
+        return converter, device
 
 
 def _build_accelerator_options(AcceleratorOptions, *, device, num_threads: int):
@@ -134,22 +238,36 @@ def _build_accelerator_options(AcceleratorOptions, *, device, num_threads: int):
 def _resolve_accelerator_device(AcceleratorDevice, device_name: str):
     """Return the AcceleratorDevice enum value for the requested device.
 
-    Falls back gracefully when the requested device or auto-detection target
-    isn't available in the installed Docling version (older builds may lack
-    AUTO/MPS/CUDA constants).
+    Falls back gracefully when:
+    - the requested device or auto-detection target isn't available in the
+      installed Docling version (older builds may lack AUTO/MPS/CUDA constants);
+    - the chosen device has already failed once in this process (recorded in
+      ``_FAILED_DEVICES``) — this is the recovery path for runtime
+      incompatibilities such as transformers' RT-DETR v2 needing float64 on
+      MPS, which Apple Silicon doesn't support.
+
+    For ``auto`` we always probe the runtime ourselves (CUDA → MPS → CPU)
+    instead of returning Docling's opaque ``AcceleratorDevice.AUTO``. Using
+    a concrete device makes the blacklist precise: when MPS fails we can
+    blacklist exactly that device, and the next call will pick CPU instead
+    of re-selecting MPS through AUTO.
     """
     name = (device_name or "auto").lower().strip()
 
     if name == "auto":
-        # Prefer Docling's native AUTO when available (lets the library decide).
-        if hasattr(AcceleratorDevice, "AUTO"):
-            return AcceleratorDevice.AUTO
-        # Otherwise probe the runtime ourselves.
         return _auto_detect_device(AcceleratorDevice)
 
     enum_name = name.upper()
     if hasattr(AcceleratorDevice, enum_name):
-        return getattr(AcceleratorDevice, enum_name)
+        explicit = getattr(AcceleratorDevice, enum_name)
+        if _is_device_blacklisted(explicit):
+            logger.warning(
+                "Configured accelerator_device=%r previously failed in this process; "
+                "falling back to CPU.",
+                device_name,
+            )
+            return AcceleratorDevice.CPU
+        return explicit
 
     logger.warning(
         "Configured accelerator_device=%r is not available in this Docling version; "
@@ -159,19 +277,31 @@ def _resolve_accelerator_device(AcceleratorDevice, device_name: str):
     return AcceleratorDevice.CPU
 
 
+def _any_known_device_blacklisted(AcceleratorDevice) -> bool:
+    """Return True if MPS or CUDA is blacklisted. Kept for legacy callers."""
+    for attr in ("MPS", "CUDA"):
+        if hasattr(AcceleratorDevice, attr) and _is_device_blacklisted(getattr(AcceleratorDevice, attr)):
+            return True
+    return False
+
+
 def _auto_detect_device(AcceleratorDevice):
     """Pick the best available device based on the runtime hardware.
 
     Order of preference: CUDA → MPS → CPU. Each step is fully guarded so a
     missing torch / missing enum constant / driver error always degrades
-    quietly to CPU.
+    quietly to CPU. Devices already blacklisted in this process are skipped.
     """
     try:
         import torch  # type: ignore
 
         # NVIDIA GPU (Linux/Windows; rarely macOS).
         try:
-            if torch.cuda.is_available() and hasattr(AcceleratorDevice, "CUDA"):
+            if (
+                torch.cuda.is_available()
+                and hasattr(AcceleratorDevice, "CUDA")
+                and not _is_device_blacklisted(AcceleratorDevice.CUDA)
+            ):
                 return AcceleratorDevice.CUDA
         except Exception:
             pass
@@ -179,7 +309,12 @@ def _auto_detect_device(AcceleratorDevice):
         # Apple Silicon GPU.
         try:
             mps = getattr(torch.backends, "mps", None)
-            if mps is not None and mps.is_available() and hasattr(AcceleratorDevice, "MPS"):
+            if (
+                mps is not None
+                and mps.is_available()
+                and hasattr(AcceleratorDevice, "MPS")
+                and not _is_device_blacklisted(AcceleratorDevice.MPS)
+            ):
                 return AcceleratorDevice.MPS
         except Exception:
             pass
