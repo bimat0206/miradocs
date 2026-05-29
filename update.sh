@@ -15,6 +15,7 @@ STATUS_FILE="data/update-status.json"
 VENV_DIR=".venv"
 FRONTEND_DIR="frontend"
 API_PORT=8000
+CURRENT_VERSION=$(cat VERSION 2>/dev/null || echo "unknown")
 
 write_status() {
   local status="$1"
@@ -35,7 +36,7 @@ mkdir -p data
 # Clear previous log
 > "$LOG_FILE"
 
-write_status "updating" "Starting update..."
+write_status "updating" "Starting update..." "$CURRENT_VERSION"
 log "=== MiraDocs Update Started ==="
 
 # ── 1. Wait for HTTP response to finish ──
@@ -43,7 +44,7 @@ sleep 2
 
 # ── 2. Stop running services ──
 log "Stopping services..."
-write_status "updating" "Stopping services..."
+write_status "updating" "Stopping services..." "$CURRENT_VERSION"
 
 # Kill FastAPI (uvicorn) and Next.js processes for this project
 pkill -f "uvicorn src.api.main:app" 2>/dev/null || true
@@ -61,7 +62,7 @@ log "Previous version: $PREV_VERSION ($PREV_COMMIT)"
 
 # ── 4. Pull latest from remote ──
 log "Pulling latest changes..."
-write_status "updating" "Pulling latest changes..."
+write_status "updating" "Pulling latest changes..." "$PREV_VERSION"
 
 # Stash any locally modified tracked files so the pull can proceed cleanly.
 # Track whether we stashed so we can restore afterward.
@@ -95,7 +96,7 @@ log "New version: $NEW_VERSION"
 
 # ── 5. Install dependencies if changed ──
 log "Checking dependencies..."
-write_status "updating" "Installing dependencies..."
+write_status "updating" "Installing dependencies..." "$NEW_VERSION"
 
 # Check if Python deps changed
 if ! git diff --quiet "$PREV_COMMIT" HEAD -- requirements.txt 2>/dev/null; then
@@ -111,7 +112,7 @@ fi
 
 # ── 6. Restart the stack ──
 log "Restarting services..."
-write_status "updating" "Restarting services..."
+write_status "updating" "Restarting services..." "$NEW_VERSION"
 
 # Start using the same start.sh mechanism
 bash start.sh >> "$LOG_FILE" 2>&1 &
