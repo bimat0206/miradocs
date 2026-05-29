@@ -9,10 +9,26 @@ logger = logging.getLogger(__name__)
 
 def parse_with_docling(file_path: Path) -> dict[str, Any]:
     """Parse document using Docling. Returns structured result."""
-    from docling.document_converter import DocumentConverter
+    from docling.datamodel.accelerator_options import (
+        AcceleratorDevice,
+        AcceleratorOptions,
+    )
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
 
     logger.info(f"Parsing with Docling: {file_path}")
-    converter = DocumentConverter()
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(
+                pipeline_options=PdfPipelineOptions(
+                    accelerator_options=AcceleratorOptions(
+                        device=AcceleratorDevice.CPU
+                    )
+                )
+            )
+        }
+    )
     result = converter.convert(str(file_path))
     doc = result.document
 
