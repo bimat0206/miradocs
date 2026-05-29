@@ -117,6 +117,12 @@ fi
 log "Restarting services..."
 write_status "updating" "Restarting services..." "$NEW_VERSION"
 
+if [[ "${MIRADOCS_UPDATE_MODE:-}" == "startup" ]]; then
+  write_status "success" "Updated to $NEW_VERSION. Startup will continue." "$NEW_VERSION"
+  log "Startup update complete; returning control to start.sh."
+  exit 0
+fi
+
 # Start using the same start.sh mechanism without re-entering startup update.
 MIRADOCS_SKIP_START_UPDATE=1 bash start.sh >> "$LOG_FILE" 2>&1 &
 

@@ -139,8 +139,13 @@ check_startup_update() {
         return 0
     fi
 
-    MIRADOCS_SKIP_START_UPDATE=1 bash update.sh
-    exit 0
+    if ! MIRADOCS_SKIP_START_UPDATE=1 MIRADOCS_UPDATE_MODE=startup bash update.sh; then
+        fail "Startup update failed; see data/update.log for details"
+        exit 1
+    fi
+
+    info "Restarting MiraDocs from the updated start.sh"
+    exec env MIRADOCS_SKIP_START_UPDATE=1 bash start.sh
 }
 
 check_startup_update

@@ -22,7 +22,7 @@ def _copy_start_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     (app_dir / "VERSION").write_text("1.0.0\n", encoding="utf-8")
     (app_dir / "update.sh").write_text(
         "#!/usr/bin/env bash\n"
-        "echo \"skip=${MIRADOCS_SKIP_START_UPDATE:-}\" > update-called.txt\n",
+        "echo \"skip=${MIRADOCS_SKIP_START_UPDATE:-} mode=${MIRADOCS_UPDATE_MODE:-}\" > update-called.txt\n",
         encoding="utf-8",
     )
     (app_dir / "update.sh").chmod(0o755)
@@ -62,8 +62,9 @@ def test_start_runs_update_script_when_remote_version_differs(tmp_path):
     result = _run_start_update_check(app_dir, bin_dir, start_script)
 
     assert result.returncode == 0, result.stderr
-    assert (app_dir / "update-called.txt").read_text(encoding="utf-8") == "skip=1\n"
+    assert (app_dir / "update-called.txt").read_text(encoding="utf-8") == "skip=1 mode=startup\n"
     assert "Update available: 1.0.0 -> 1.1.0" in result.stdout
+    assert "Restarting MiraDocs from the updated start.sh" in result.stdout
     assert "Environment" not in result.stdout
 
 
