@@ -1,6 +1,7 @@
 import { ArrowLeft, Bot, Brain, FileSearch, GitCompareArrows, Lock, Search, Sparkles, Tags, Upload } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { VersionBadge } from "../../components/version-badge";
 
 export const metadata: Metadata = {
   title: "About | MiraDocs",
@@ -67,6 +68,9 @@ export default function AboutPage() {
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs text-cyan-200">
               <Lock size={11} />
               100% local · no cloud · no data leaves your machine
+            </div>
+            <div className="mb-4">
+              <VersionBadge />
             </div>
             <h1 className="text-5xl font-semibold leading-tight tracking-tight text-slate-50">
               Your documents.<br />

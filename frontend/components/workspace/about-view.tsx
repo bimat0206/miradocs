@@ -1,4 +1,5 @@
 import { Bot, Brain, FileSearch, GitCompareArrows, Search, Sparkles, Tags, Upload, X } from "lucide-react";
+import { VersionBadge } from "../version-badge";
 
 const steps = [
   { step: "01", title: "Upload", icon: Upload, desc: "Drop any PDF, DOCX, or PPTX into the Library. MiraDocs parses, extracts tables and figures, and builds a structured knowledge base — all on your machine." },
@@ -27,7 +28,10 @@ export function AboutView({ onClose }: AboutViewProps) {
       <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-6 py-4">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-cyan-200/60">About</p>
-          <h2 className="text-lg font-semibold text-slate-50">MiraDocs</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-lg font-semibold text-slate-50">MiraDocs</h2>
+            <VersionBadge />
+          </div>
         </div>
         <button
           type="button"

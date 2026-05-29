@@ -2,11 +2,21 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { API_BASE } from "../lib/api";
+import {
+  formatUpdateAvailableMessage,
+  formatUpdateProgressMessage,
+  formatVersionLabel,
+  isTerminalUpdateStatus,
+  type HealthResponse,
+  type UpdateStatusResponse,
+  type VersionCheckResponse,
+} from "../lib/update-status";
 
 type UpdateState = "idle" | "available" | "updating" | "success" | "failed";
 
 export function UpdateNotification() {
   const [state, setState] = useState<UpdateState>("idle");
+  const [localVersion, setLocalVersion] = useState("");
   const [remoteVersion, setRemoteVersion] = useState("");
   const [message, setMessage] = useState("");
 
@@ -16,9 +26,11 @@ export function UpdateNotification() {
       try {
         const res = await fetch(`${API_BASE}/api/version-check`);
         if (!res.ok) return;
-        const data = await res.json();
+        const data = (await res.json()) as VersionCheckResponse;
+        setLocalVersion(data.local_version);
+        setRemoteVersion(data.remote_version);
         if (data.update_available) {
-          setRemoteVersion(data.remote_version);
+          setMessage(formatUpdateAvailableMessage(data.local_version, data.remote_version));
           setState("available");
         }
       } catch { /* offline or API not ready */ }
@@ -26,8 +38,8 @@ export function UpdateNotification() {
     check();
   }, []);
 
-  // Poll health after triggering update
-  const pollHealth = useCallback(() => {
+  // Poll update status after triggering update.
+  const pollUpdateStatus = useCallback(() => {
     let attempts = 0;
     const maxAttempts = 60; // 3s * 60 = 3 min max wait
     const interval = setInterval(async () => {
@@ -39,27 +51,41 @@ export function UpdateNotification() {
         return;
       }
       try {
-        const res = await fetch(`${API_BASE}/api/health`);
+        const res = await fetch(`${API_BASE}/api/update-status`);
         if (res.ok) {
-          const data = await res.json();
-          clearInterval(interval);
-          setState("success");
-          setMessage(`Updated to v${data.version}`);
-          // Auto-reload after showing success
-          setTimeout(() => window.location.reload(), 2000);
+          const data = (await res.json()) as UpdateStatusResponse;
+          if (data.status === "updating") {
+            setMessage(formatUpdateProgressMessage(localVersion, remoteVersion, data.message));
+            return;
+          }
+          if (isTerminalUpdateStatus(data.status)) {
+            clearInterval(interval);
+            setState(data.status);
+            setMessage(data.status === "success"
+              ? `Updated to ${formatVersionLabel(data.version || remoteVersion)}`
+              : data.message || "Update failed. Check logs.");
+            if (data.status === "success") {
+              setTimeout(() => window.location.reload(), 2000);
+            }
+          }
+        } else {
+          const healthRes = await fetch(`${API_BASE}/api/health`);
+          if (healthRes.ok) {
+            const health = (await healthRes.json()) as HealthResponse;
+            setMessage(formatUpdateProgressMessage(localVersion, remoteVersion, `API healthy on ${formatVersionLabel(health.version)}`));
+          }
         }
       } catch { /* still restarting */ }
     }, 3000);
-  }, []);
+  }, [localVersion, remoteVersion]);
 
   const handleUpdate = async () => {
     setState("updating");
-    setMessage("Updating... app will restart shortly.");
+    setMessage(formatUpdateProgressMessage(localVersion, remoteVersion, "app will restart shortly."));
     try {
       await fetch(`${API_BASE}/api/update`, { method: "POST" });
     } catch { /* expected — server may die before responding */ }
-    // Start polling for health
-    setTimeout(pollHealth, 5000);
+    setTimeout(pollUpdateStatus, 5000);
   };
 
   const handleDismiss = () => setState("idle");
@@ -83,7 +109,7 @@ export function UpdateNotification() {
               </div>
             </div>
             <p className="text-sm text-gray-600">
-              The app will restart automatically after updating. Your documents and data are preserved.
+              {message}
             </p>
             <div className="flex gap-3 pt-2">
               <button

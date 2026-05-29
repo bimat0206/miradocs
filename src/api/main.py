@@ -592,11 +592,11 @@ def create_app(
         root = Path(__file__).resolve().parent.parent.parent
         status_file = root / "data" / "update-status.json"
         if not status_file.exists():
-            return {"status": "idle"}
+            return {"status": "idle", "version": _read_local_version()}
         try:
             return json.loads(status_file.read_text())
         except Exception:
-            return {"status": "idle"}
+            return {"status": "idle", "version": _read_local_version()}
 
     return app
 
