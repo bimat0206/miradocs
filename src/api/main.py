@@ -572,14 +572,15 @@ def create_app(
     @app.post("/api/update")
     def trigger_update():
         import subprocess
+        import sys
         root = Path(__file__).resolve().parent.parent.parent
-        script = root / "update.sh"
+        script = root / "start.py"
         if not script.exists():
-            raise HTTPException(status_code=500, detail="update.sh not found")
-        # Spawn detached process — update.sh writes its own log to data/update.log
+            raise HTTPException(status_code=500, detail="start.py not found")
+        # Spawn detached process — start.py update writes its own log to data/update.log
         (root / "data").mkdir(parents=True, exist_ok=True)
         subprocess.Popen(
-            ["bash", str(script)],
+            [sys.executable, str(script), "update"],
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

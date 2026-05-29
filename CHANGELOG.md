@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.4 - 2026-05-29
+
+- Migrated startup, service supervision, and update logic into the Python launcher `start.py`.
+- Reduced `start.sh` and `update.sh` to compatibility wrappers around the Python launcher.
+- Updated `/api/update` to invoke `start.py update` directly.
+- Kept update status and logs at `data/update-status.json` and `data/update.log`.
+
 ## v1.1.3 - 2026-05-29
 
 - Fixed startup-triggered updates so `./start.sh` updates in place and then re-execs the refreshed launcher in the same terminal.

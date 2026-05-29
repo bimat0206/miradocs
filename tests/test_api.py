@@ -627,6 +627,29 @@ def test_index_status_reports_chunks_and_adapter_status(tmp_path):
     assert body["adapter"]["collection"] == "test"
 
 
+def test_update_endpoint_spawns_python_launcher(tmp_path, monkeypatch):
+    client, _, _, _ = _client(tmp_path)
+    popen_calls = []
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            popen_calls.append((args, kwargs))
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+
+    response = client.post("/api/update")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "updating"
+    assert len(popen_calls) == 1
+    args, kwargs = popen_calls[0]
+    assert args[1].endswith("start.py")
+    assert args[2] == "update"
+    assert kwargs["start_new_session"] is True
+
+
 def test_pipeline_run_only_indexes_when_steps_1_8_successful(tmp_path):
     client, registry, data_dir, index_adapter = _client(tmp_path)
     doc_id = registry.register_document(

@@ -1,6 +1,5 @@
+import importlib.util
 import os
-import shutil
-import stat
 import subprocess
 from pathlib import Path
 
@@ -8,136 +7,114 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _write_executable(path: Path, body: str) -> None:
-    path.write_text(body, encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+def _load_start_module():
+    spec = importlib.util.spec_from_file_location("miradocs_start", ROOT / "start.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _copy_start_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
-    app_dir = tmp_path / "app"
-    bin_dir = tmp_path / "bin"
-    app_dir.mkdir()
-    bin_dir.mkdir()
-    shutil.copy(ROOT / "start.sh", app_dir / "start.sh")
-    (app_dir / "VERSION").write_text("1.0.0\n", encoding="utf-8")
-    (app_dir / "update.sh").write_text(
-        "#!/usr/bin/env bash\n"
-        "echo \"skip=${MIRADOCS_SKIP_START_UPDATE:-} mode=${MIRADOCS_UPDATE_MODE:-}\" > update-called.txt\n",
-        encoding="utf-8",
-    )
-    (app_dir / "update.sh").chmod(0o755)
-    return app_dir, bin_dir, app_dir / "start.sh"
+def test_startup_update_runs_integrated_python_update(tmp_path, capsys):
+    module = _load_start_module()
+    (tmp_path / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+
+    class FakeLauncher(module.Launcher):
+        def __init__(self):
+            super().__init__(root=tmp_path, env={"MIRADOCS_START_UPDATE_ONLY": "1"})
+            self.update_modes = []
+
+        def github_repo_from_origin(self):
+            return "example/miradocs"
+
+        def remote_main_version(self, repo):
+            assert repo == "example/miradocs"
+            return "1.1.0"
+
+        def run_update(self, *, mode="detached"):
+            self.update_modes.append(mode)
+            return 0
+
+    launcher = FakeLauncher()
+
+    assert launcher.check_startup_update() is True
+    assert launcher.update_modes == ["startup"]
+    output = capsys.readouterr().out
+    assert "Update available: 1.0.0 -> 1.1.0" in output
+    assert "Running integrated Python updater" in output
+    assert "Restarting MiraDocs from the updated Python launcher" in output
 
 
-def _run_start_update_check(app_dir: Path, bin_dir: Path, start_script: Path) -> subprocess.CompletedProcess[str]:
-    env = {
-        **os.environ,
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "MIRADOCS_START_UPDATE_ONLY": "1",
-        "NO_COLOR": "1",
-    }
-    return subprocess.run(
-        ["bash", str(start_script)],
-        cwd=app_dir,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+def test_startup_update_check_skips_when_guard_is_set(tmp_path):
+    module = _load_start_module()
+    (tmp_path / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+
+    class FakeLauncher(module.Launcher):
+        def github_repo_from_origin(self):
+            raise AssertionError("git remote should not be checked when startup update is skipped")
+
+    launcher = FakeLauncher(root=tmp_path, env={"MIRADOCS_SKIP_START_UPDATE": "1"})
+
+    assert launcher.check_startup_update() is False
 
 
-def test_start_runs_update_script_when_remote_version_differs(tmp_path):
-    app_dir, bin_dir, start_script = _copy_start_fixture(tmp_path)
-    _write_executable(
-        bin_dir / "git",
-        "#!/usr/bin/env bash\n"
-        "if [[ \"$*\" == \"remote get-url origin\" ]]; then\n"
-        "  echo 'https://github.com/example/miradocs.git'\n"
-        "  exit 0\n"
-        "fi\n"
-        "exit 1\n",
-    )
-    _write_executable(bin_dir / "curl", "#!/usr/bin/env bash\necho '1.1.0'\n")
-
-    result = _run_start_update_check(app_dir, bin_dir, start_script)
-
-    assert result.returncode == 0, result.stderr
-    assert (app_dir / "update-called.txt").read_text(encoding="utf-8") == "skip=1 mode=startup\n"
-    assert "Update available: 1.0.0 -> 1.1.0" in result.stdout
-    assert "Restarting MiraDocs from the updated start.sh" in result.stdout
-    assert "Environment" not in result.stdout
-
-
-def test_start_update_check_continues_when_versions_match(tmp_path):
-    app_dir, bin_dir, start_script = _copy_start_fixture(tmp_path)
-    _write_executable(
-        bin_dir / "git",
-        "#!/usr/bin/env bash\n"
-        "if [[ \"$*\" == \"remote get-url origin\" ]]; then\n"
-        "  echo 'https://github.com/example/miradocs.git'\n"
-        "  exit 0\n"
-        "fi\n"
-        "exit 1\n",
-    )
-    _write_executable(bin_dir / "curl", "#!/usr/bin/env bash\necho '1.0.0'\n")
-
-    result = _run_start_update_check(app_dir, bin_dir, start_script)
-
-    assert result.returncode == 0, result.stderr
-    assert not (app_dir / "update-called.txt").exists()
-    assert "Environment" not in result.stdout
-
-
-def test_start_update_check_is_skipped_when_guard_is_set(tmp_path):
-    app_dir, bin_dir, start_script = _copy_start_fixture(tmp_path)
-    _write_executable(
-        bin_dir / "git",
-        "#!/usr/bin/env bash\n"
-        "echo 'git should not be called' >&2\n"
-        "exit 99\n",
-    )
-    _write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nexit 99\n")
-
-    env = {
-        **os.environ,
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "MIRADOCS_SKIP_START_UPDATE": "1",
-        "MIRADOCS_START_UPDATE_ONLY": "1",
-    }
-    result = subprocess.run(
-        ["bash", str(start_script)],
-        cwd=app_dir,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert not (app_dir / "update-called.txt").exists()
-
-
-def test_start_exits_without_cleanup_during_update_handoff(tmp_path):
-    app_dir, bin_dir, start_script = _copy_start_fixture(tmp_path)
-    handoff_file = app_dir / "data" / "update-restart-requested"
+def test_start_exits_without_cleanup_during_update_handoff(tmp_path, capsys):
+    module = _load_start_module()
+    handoff_file = tmp_path / "data" / "update-restart-requested"
     handoff_file.parent.mkdir()
     handoff_file.write_text("123\n", encoding="utf-8")
 
-    env = {
-        **os.environ,
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "MIRADOCS_TEST_UPDATE_HANDOFF_EXIT": "1",
-    }
+    class FakeLauncher(module.Launcher):
+        def __init__(self):
+            super().__init__(root=tmp_path, env={})
+            self.cleanup_called = False
+
+        def cleanup(self):
+            self.cleanup_called = True
+
+    launcher = FakeLauncher()
+
+    assert launcher.handle_process_exit("Next.js", 12345) == 0
+    assert launcher.cleanup_called is False
+    assert "Update restart in progress" in capsys.readouterr().out
+
+
+def test_shell_scripts_delegate_to_python_launcher():
+    start_sh = (ROOT / "start.sh").read_text(encoding="utf-8")
+    update_sh = (ROOT / "update.sh").read_text(encoding="utf-8")
+
+    assert 'python3 "$SCRIPT_DIR/start.py" "$@"' in start_sh
+    assert 'python3 "$SCRIPT_DIR/start.py" update "$@"' in update_sh
+    assert "git pull" not in update_sh
+    assert "pkill" not in update_sh
+
+
+def test_api_update_endpoint_uses_python_launcher():
+    api_main = (ROOT / "src" / "api" / "main.py").read_text(encoding="utf-8")
+
+    assert 'root / "start.py"' in api_main
+    assert '"update"' in api_main
+    assert 'root / "update.sh"' not in api_main
+
+
+def test_startup_update_only_cli_exits_before_environment_checks(tmp_path):
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    for name in ["start.py", "start.sh"]:
+        src = ROOT / name
+        dest = app_dir / name
+        dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        dest.chmod(src.stat().st_mode)
+    (app_dir / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+
     result = subprocess.run(
-        ["bash", str(start_script)],
+        ["python3", "start.py"],
         cwd=app_dir,
-        env=env,
+        env={**os.environ, "MIRADOCS_START_UPDATE_ONLY": "1", "MIRADOCS_SKIP_START_UPDATE": "1"},
         text=True,
         capture_output=True,
         check=False,
     )
 
     assert result.returncode == 0, result.stderr
-    assert "Update restart in progress" in result.stdout
-    assert "Shutting down MiraDocs" not in result.stdout
-    assert "Next.js process exited unexpectedly" not in result.stdout
+    assert "Environment" not in result.stdout
