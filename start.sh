@@ -22,6 +22,8 @@ SQLITE_DB="data/registry.db"
 QDRANT_DATA_DIR="data/indexes/qdrant"
 FRONTEND_DIR="frontend"
 MCP_MODULE="src.mcp.server"   # stdio transport — NOT backgrounded; spawned per-connection by MCP client
+UPDATE_HANDOFF_FILE="data/update-restart-requested"
+UPDATE_HANDOFF_TTL_SECONDS=300
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -40,6 +42,42 @@ API_PID=""
 WEB_PID=""
 ERRORS=0
 WARNINGS=0
+
+update_handoff_requested() {
+    if [[ ! -f "$UPDATE_HANDOFF_FILE" ]]; then
+        return 1
+    fi
+
+    local marker_age now marker_mtime
+    now=$(date +%s)
+    marker_mtime=$(stat -f %m "$UPDATE_HANDOFF_FILE" 2>/dev/null || stat -c %Y "$UPDATE_HANDOFF_FILE" 2>/dev/null || echo 0)
+    marker_age=$((now - marker_mtime))
+    if (( marker_age > UPDATE_HANDOFF_TTL_SECONDS )); then
+        rm -f "$UPDATE_HANDOFF_FILE"
+        return 1
+    fi
+
+    return 0
+}
+
+exit_for_update_handoff() {
+    info "Update restart in progress; handing service control to update.sh"
+    trap - EXIT
+    exit 0
+}
+
+handle_process_exit() {
+    local process_name="$1"
+    local pid="$2"
+
+    if update_handoff_requested; then
+        exit_for_update_handoff
+    fi
+
+    fail "${process_name} process exited unexpectedly (PID ${pid})"
+    cleanup
+    exit 1
+}
 
 github_repo_from_origin() {
     local url repo
@@ -144,6 +182,10 @@ cleanup() {
 }
 
 trap cleanup INT TERM EXIT
+
+if [[ "${MIRADOCS_TEST_UPDATE_HANDOFF_EXIT:-}" == "1" ]]; then
+    handle_process_exit "Next.js" "12345"
+fi
 
 header "Environment"
 if [[ ! -d "$VENV_DIR" ]]; then
@@ -319,14 +361,10 @@ info "Press Ctrl+C to stop both services"
 # Monitor: if either process exits unexpectedly, shut everything down
 while true; do
     if [[ -n "$API_PID" ]] && ! kill -0 "$API_PID" 2>/dev/null; then
-        fail "FastAPI process exited unexpectedly (PID $API_PID)"
-        cleanup
-        exit 1
+        handle_process_exit "FastAPI" "$API_PID"
     fi
     if [[ -n "$WEB_PID" ]] && ! kill -0 "$WEB_PID" 2>/dev/null; then
-        fail "Next.js process exited unexpectedly (PID $WEB_PID)"
-        cleanup
-        exit 1
+        handle_process_exit "Next.js" "$WEB_PID"
     fi
     sleep 2
 done

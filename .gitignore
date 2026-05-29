@@ -13,6 +13,7 @@ data/registry.db
 *.egg-info/
 data/update.log
 data/update-status.json
+data/update-restart-requested
 
 # Keep local changelog drafts out of regular staging; release changelogs are force-added.
 CHANGELOG.md

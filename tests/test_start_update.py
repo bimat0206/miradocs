@@ -114,3 +114,29 @@ def test_start_update_check_is_skipped_when_guard_is_set(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert not (app_dir / "update-called.txt").exists()
+
+
+def test_start_exits_without_cleanup_during_update_handoff(tmp_path):
+    app_dir, bin_dir, start_script = _copy_start_fixture(tmp_path)
+    handoff_file = app_dir / "data" / "update-restart-requested"
+    handoff_file.parent.mkdir()
+    handoff_file.write_text("123\n", encoding="utf-8")
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "MIRADOCS_TEST_UPDATE_HANDOFF_EXIT": "1",
+    }
+    result = subprocess.run(
+        ["bash", str(start_script)],
+        cwd=app_dir,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Update restart in progress" in result.stdout
+    assert "Shutting down MiraDocs" not in result.stdout
+    assert "Next.js process exited unexpectedly" not in result.stdout

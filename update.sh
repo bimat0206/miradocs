@@ -12,6 +12,7 @@ cd "$SCRIPT_DIR"
 
 LOG_FILE="data/update.log"
 STATUS_FILE="data/update-status.json"
+UPDATE_HANDOFF_FILE="data/update-restart-requested"
 VENV_DIR=".venv"
 FRONTEND_DIR="frontend"
 API_PORT=8000
@@ -32,6 +33,7 @@ log() {
 
 # Ensure data dir exists for log/status files
 mkdir -p data
+trap 'rm -f "$UPDATE_HANDOFF_FILE"' EXIT
 
 # Clear previous log
 > "$LOG_FILE"
@@ -45,6 +47,7 @@ sleep 2
 # ── 2. Stop running services ──
 log "Stopping services..."
 write_status "updating" "Stopping services..." "$CURRENT_VERSION"
+printf '%s\n' "$$" > "$UPDATE_HANDOFF_FILE"
 
 # Kill FastAPI (uvicorn) and Next.js processes for this project
 pkill -f "uvicorn src.api.main:app" 2>/dev/null || true
@@ -123,6 +126,7 @@ for i in $(seq 1 30); do
   if curl -s "http://localhost:${API_PORT}/api/health" > /dev/null 2>&1; then
     log "API is healthy."
     write_status "success" "Updated to $NEW_VERSION" "$NEW_VERSION"
+    rm -f "$UPDATE_HANDOFF_FILE"
     log "=== Update Complete ==="
     exit 0
   fi
@@ -131,5 +135,6 @@ done
 
 # Timeout — services didn't come back
 write_status "failed" "Services failed to restart after update." "$NEW_VERSION"
+rm -f "$UPDATE_HANDOFF_FILE"
 log "ERROR: Services did not become healthy within 60s."
 exit 1

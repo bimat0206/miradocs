@@ -12,7 +12,7 @@ def test_release_version_metadata_is_consistent():
     package_lock = json.loads((ROOT / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
     mcp_server = (ROOT / "src" / "mcp" / "server.py").read_text(encoding="utf-8")
 
-    assert version == "1.1.1"
+    assert version == "1.1.2"
     assert package_json["version"] == version
     assert package_lock["version"] == version
     assert package_lock["packages"][""]["version"] == version
