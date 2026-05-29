@@ -8,6 +8,18 @@ parsing:
   fallback_parser: "pymupdf"
   page_image_dpi: 150
   ocr_enabled: true
+  # Hardware acceleration for Docling.
+  #   auto : detect best available (CUDA → MPS → CPU)
+  #   cpu  : force CPU (most compatible across all OS/architectures)
+  #   cuda : NVIDIA GPU (Linux/Windows)
+  #   mps  : Apple Silicon GPU (macOS arm64)
+  accelerator_device: "auto"
+  # Intra-op threads for Docling (0 = library default).
+  accelerator_num_threads: 0
+  # Workers for parallel PDF page rendering (0 = auto = min(cpu_cores // 2, 4)).
+  page_image_workers: 0
+  # Workers for parallel figure cropping (0 = auto = min(cpu_cores // 2, 4)).
+  figure_workers: 0
 
 embedding:
   provider: "ollama"

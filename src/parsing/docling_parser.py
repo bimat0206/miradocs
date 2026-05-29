@@ -1,41 +1,63 @@
-"""Docling-based document parser."""
-import json
+"""Docling-based document parser.
+
+Performance optimizations:
+- DocumentConverter is cached as a thread-safe module-level singleton so that
+  Docling's expensive ML model loading (layout / table-structure / OCR) only
+  happens once per process, not per document.
+- Hardware acceleration is auto-detected and configurable.
+
+Cross-platform / cross-architecture support:
+- macOS arm64 (Apple Silicon): MPS via PyTorch when available
+- macOS x86_64 (Intel)        : CPU
+- Linux + NVIDIA              : CUDA
+- Linux ARM64 / other         : CPU
+- Windows + NVIDIA            : CUDA
+- Windows other               : CPU
+
+The accelerator can be overridden in ``config/settings.yaml`` under
+``parsing.accelerator_device`` (``auto`` | ``cpu`` | ``cuda`` | ``mps``).
+"""
+from __future__ import annotations
+
 import logging
+import threading
 from pathlib import Path
 from typing import Any
+
+from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
 
+# ─── Cached singleton ────────────────────────────────────────────────────────
+
+# The cache key includes the resolved device + thread count so a config change
+# transparently rebuilds the converter on next call. We also key on the
+# DocumentConverter class identity so monkeypatched test doubles never see a
+# stale real converter.
+_CONVERTER_CACHE: dict[tuple, Any] = {}
+_CONVERTER_LOCK = threading.Lock()
+
+
+def reset_converter_cache() -> None:
+    """Clear the cached DocumentConverter. Intended for tests and config reloads."""
+    with _CONVERTER_LOCK:
+        _CONVERTER_CACHE.clear()
+
+
+# ─── Public API ──────────────────────────────────────────────────────────────
+
 def parse_with_docling(file_path: Path) -> dict[str, Any]:
     """Parse document using Docling. Returns structured result."""
-    from docling.datamodel.accelerator_options import (
-        AcceleratorDevice,
-        AcceleratorOptions,
-    )
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+    converter = _get_or_create_converter()
 
-    logger.info(f"Parsing with Docling: {file_path}")
-    converter = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(
-                pipeline_options=PdfPipelineOptions(
-                    accelerator_options=AcceleratorOptions(
-                        device=AcceleratorDevice.CPU
-                    )
-                )
-            )
-        }
-    )
+    logger.info("Parsing with Docling: %s", file_path)
     result = converter.convert(str(file_path))
     doc = result.document
 
     markdown = doc.export_to_markdown()
     doc_dict = doc.export_to_dict()
 
-    # Extract sections from document structure
     sections = _extract_sections(doc_dict)
     tables = _extract_tables(doc_dict)
     figures = _extract_figures(doc_dict)
@@ -51,6 +73,124 @@ def parse_with_docling(file_path: Path) -> dict[str, Any]:
         "parser": "docling",
     }
 
+
+# ─── Converter construction ──────────────────────────────────────────────────
+
+def _get_or_create_converter():
+    """Return a cached DocumentConverter, creating it on first use."""
+    from docling.datamodel.accelerator_options import (
+        AcceleratorDevice,
+        AcceleratorOptions,
+    )
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+    cfg = get_config().get("parsing", {})
+    device_name = str(cfg.get("accelerator_device", "auto")).lower()
+    num_threads = int(cfg.get("accelerator_num_threads", 0) or 0)
+
+    device = _resolve_accelerator_device(AcceleratorDevice, device_name)
+
+    # Cache key includes the class identity so monkeypatched test doubles
+    # don't share a cached real instance from a previous test.
+    cache_key = (id(DocumentConverter), id(device), num_threads)
+
+    with _CONVERTER_LOCK:
+        cached = _CONVERTER_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        accelerator_options = _build_accelerator_options(
+            AcceleratorOptions, device=device, num_threads=num_threads
+        )
+        pipeline_options = PdfPipelineOptions(accelerator_options=accelerator_options)
+
+        converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            }
+        )
+
+        _CONVERTER_CACHE[cache_key] = converter
+        logger.info(
+            "Initialized Docling DocumentConverter (device=%s, num_threads=%s)",
+            getattr(device, "name", device), num_threads or "library-default",
+        )
+        return converter
+
+
+def _build_accelerator_options(AcceleratorOptions, *, device, num_threads: int):
+    """Construct AcceleratorOptions, tolerating older Docling signatures."""
+    # Newer versions accept num_threads; older ones don't. Try the rich form first.
+    if num_threads > 0:
+        try:
+            return AcceleratorOptions(device=device, num_threads=num_threads)
+        except TypeError:
+            logger.debug("AcceleratorOptions does not accept num_threads; using device-only.")
+    return AcceleratorOptions(device=device)
+
+
+def _resolve_accelerator_device(AcceleratorDevice, device_name: str):
+    """Return the AcceleratorDevice enum value for the requested device.
+
+    Falls back gracefully when the requested device or auto-detection target
+    isn't available in the installed Docling version (older builds may lack
+    AUTO/MPS/CUDA constants).
+    """
+    name = (device_name or "auto").lower().strip()
+
+    if name == "auto":
+        # Prefer Docling's native AUTO when available (lets the library decide).
+        if hasattr(AcceleratorDevice, "AUTO"):
+            return AcceleratorDevice.AUTO
+        # Otherwise probe the runtime ourselves.
+        return _auto_detect_device(AcceleratorDevice)
+
+    enum_name = name.upper()
+    if hasattr(AcceleratorDevice, enum_name):
+        return getattr(AcceleratorDevice, enum_name)
+
+    logger.warning(
+        "Configured accelerator_device=%r is not available in this Docling version; "
+        "falling back to CPU.",
+        device_name,
+    )
+    return AcceleratorDevice.CPU
+
+
+def _auto_detect_device(AcceleratorDevice):
+    """Pick the best available device based on the runtime hardware.
+
+    Order of preference: CUDA → MPS → CPU. Each step is fully guarded so a
+    missing torch / missing enum constant / driver error always degrades
+    quietly to CPU.
+    """
+    try:
+        import torch  # type: ignore
+
+        # NVIDIA GPU (Linux/Windows; rarely macOS).
+        try:
+            if torch.cuda.is_available() and hasattr(AcceleratorDevice, "CUDA"):
+                return AcceleratorDevice.CUDA
+        except Exception:
+            pass
+
+        # Apple Silicon GPU.
+        try:
+            mps = getattr(torch.backends, "mps", None)
+            if mps is not None and mps.is_available() and hasattr(AcceleratorDevice, "MPS"):
+                return AcceleratorDevice.MPS
+        except Exception:
+            pass
+    except ImportError:
+        # PyTorch isn't installed — Docling's CPU pipeline still works.
+        logger.debug("torch not importable; using CPU for Docling.")
+
+    return AcceleratorDevice.CPU
+
+
+# ─── Document-dict adapters (unchanged) ──────────────────────────────────────
 
 def _extract_sections(doc_dict: dict) -> list[dict]:
     """Extract section hierarchy from Docling output."""
@@ -94,7 +234,7 @@ def _extract_tables(doc_dict: dict) -> list[dict]:
         if tables:
             return tables
 
-    # Docling stores tables in the document structure
+    # Fallback: tables nested in body
     body = doc_dict.get("body", doc_dict.get("main_text", []))
     if isinstance(body, list):
         for i, item in enumerate(body):
@@ -156,7 +296,6 @@ def _get_page_count(doc_dict: dict) -> int:
     pages = doc_dict.get("pages", {})
     if pages:
         return len(pages)
-    # Fallback: find max page number from provenance
     max_page = 0
     body = doc_dict.get("body", doc_dict.get("main_text", []))
     if isinstance(body, list):
@@ -182,11 +321,9 @@ def _guess_heading_level(label: str, text: str) -> int:
     """Guess heading level from label or numbering."""
     label_lower = label.lower()
     if "section" in label_lower or "heading" in label_lower:
-        # Try to extract level from label like "section_header_level_1"
         for i in range(1, 7):
             if str(i) in label_lower:
                 return i
-    # Guess from numbering pattern
     if text and text[0].isdigit():
         dots = text.split(" ")[0].count(".")
         return min(dots + 1, 6)
