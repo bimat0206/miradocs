@@ -23,6 +23,12 @@ def generate_quality_report(
     cfg = get_config()
     low_text_threshold = cfg["quality"]["low_text_threshold"]
 
+    # DOCX/PPTX: Docling doesn't populate pages in export_to_dict, so page_count
+    # arrives as 0. Fall back to page_images count (rendered by page_image_extractor)
+    # or the number of text pages, whichever is larger.
+    if page_count == 0:
+        page_count = max(len(page_images), len(pages_text))
+
     # Compute metrics
     pages_with_text = sum(1 for p in pages_text if len(p.get("text", "").strip()) > low_text_threshold)
     low_text_pages = [p["page"] for p in pages_text if len(p.get("text", "").strip()) <= low_text_threshold]

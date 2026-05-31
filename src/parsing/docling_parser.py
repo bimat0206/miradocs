@@ -435,18 +435,25 @@ def _extract_figures(doc_dict: dict) -> list[dict]:
 
 def _get_page_count(doc_dict: dict) -> int:
     """Get page count from Docling output."""
+    # New Docling schema: pages is a dict keyed by page number (PDF only)
     pages = doc_dict.get("pages", {})
     if pages:
         return len(pages)
+    # DOCX/PPTX: pages dict is empty — scan all content items for max page_no
     max_page = 0
-    body = doc_dict.get("body", doc_dict.get("main_text", []))
-    if isinstance(body, list):
-        for item in body:
-            if isinstance(item, dict):
-                prov = item.get("prov", [{}])
-                if prov:
-                    p = prov[0].get("page_no", prov[0].get("page", 0))
+    for key in ("texts", "tables", "pictures", "body", "main_text"):
+        items = doc_dict.get(key, [])
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            for prov in item.get("prov", []):
+                p = prov.get("page_no", prov.get("page", 0))
+                if isinstance(p, int):
                     max_page = max(max_page, p)
+        if max_page:
+            break
     return max_page
 
 

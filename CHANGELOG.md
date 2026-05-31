@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.2 - 2026-05-31
+
+### Fixed
+- **DOCX/PPTX always get `NOT_READY` quality status**: Docling's `export_to_dict()` returns an empty `pages` dict for non-PDF formats, causing `page_count = 0` → immediate `NOT_READY`. Two fixes:
+  1. `quality_reporter.py`: when `page_count == 0`, fall back to `max(len(page_images), len(pages_text))` before evaluating thresholds. Page images are rendered independently and are the ground truth for DOCX/PPTX page count.
+  2. `docling_parser.py` `_get_page_count`: when `pages` dict is empty, scan `texts`, `tables`, and `pictures` items (not just `body`) for `prov[0]["page_no"]` — the correct key in the current Docling schema. Previously only scanned `body`/`main_text` which are absent in the new schema.
+
+---
+
 ## v1.5.1 - 2026-05-31
 
 ### Fixed
