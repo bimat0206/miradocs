@@ -39,11 +39,12 @@ def pipeline_summary(steps: list[dict]) -> dict:
 
 
 def list_documents(registry: DocumentRegistry) -> list[dict]:
-    docs = []
-    for doc in registry.list_documents():
-        steps = registry.get_pipeline_status(doc["doc_id"])
-        docs.append({**doc, "pipeline": pipeline_summary(steps)})
-    return docs
+    raw_docs = registry.list_documents()
+    if not raw_docs:
+        return []
+    doc_ids = [d["doc_id"] for d in raw_docs]
+    steps_by_doc = registry.get_pipeline_status_batch(doc_ids)
+    return [{**doc, "pipeline": pipeline_summary(steps_by_doc.get(doc["doc_id"], []))} for doc in raw_docs]
 
 
 def create_document(

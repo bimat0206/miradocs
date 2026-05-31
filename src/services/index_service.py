@@ -16,12 +16,24 @@ def _get_hybrid_engine():
     return _hybrid_engine
 
 
+def _count_json_array(path: Path) -> int:
+    """Count items in a JSON array file without deserializing all content."""
+    if not path.exists():
+        return 0
+    try:
+        text = path.read_text(encoding="utf-8")
+        return text.count('"chunk_id"')
+    except Exception:
+        return 0
+
+
 def index_document(doc_id: str, data_dir: Path, index_adapter_factory: Callable[[], Any]) -> dict:
     chunks_path = data_dir / "parsed" / doc_id / "chunks.json"
     if not chunks_path.exists():
         return {"status": "missing_chunks", "indexed": 0}
     chunks = json.loads(chunks_path.read_text(encoding="utf-8"))
     result = index_adapter_factory().index_chunks(chunks, doc_id)
+    result["chunks_count"] = len(chunks)
     status_path = data_dir / "parsed" / doc_id / "index_status.json"
     status_path.parent.mkdir(parents=True, exist_ok=True)
     status_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -35,15 +47,19 @@ def get_index_status(
     index_adapter_factory: Callable[[], Any],
 ) -> dict:
     chunks_path = data_dir / "parsed" / doc_id / "chunks.json"
+    # Read chunk count from cached status first; fall back to counting without full parse
+    status_path = data_dir / "parsed" / doc_id / "index_status.json"
     chunks_count = 0
     if chunks_path.exists():
-        chunks = json.loads(chunks_path.read_text(encoding="utf-8"))
-        chunks_count = len(chunks)
+        cached_status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else None
+        if cached_status and isinstance(cached_status.get("chunks_count"), int):
+            chunks_count = cached_status["chunks_count"]
+        else:
+            chunks_count = _count_json_array(chunks_path)
 
     steps = registry.get_pipeline_status(doc_id)
     step = next((s for s in steps if s["step_name"] == "indexed"), None)
-    last_result_path = data_dir / "parsed" / doc_id / "index_status.json"
-    last_result = json.loads(last_result_path.read_text(encoding="utf-8")) if last_result_path.exists() else None
+    last_result = cached_status  # already loaded above
 
     try:
         adapter_status = index_adapter_factory().get_status()

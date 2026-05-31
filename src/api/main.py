@@ -503,9 +503,10 @@ def create_app(
         doc_ids = [request.doc_id] if isinstance(request.doc_id, str) else request.doc_id
         if not doc_ids:
             raise HTTPException(status_code=400, detail="At least one doc_id must be provided")
-        for d_id in doc_ids:
-            if not app.state.registry.get_document(d_id):
-                raise HTTPException(status_code=404, detail=f"Document {d_id} not found")
+        docs_map = {d["doc_id"]: d for d in app.state.registry.get_documents_batch(doc_ids)}
+        missing = [d_id for d_id in doc_ids if d_id not in docs_map]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Document {missing[0]} not found")
         results = search_document(
             doc_id=request.doc_id,
             query=request.query,
@@ -602,12 +603,18 @@ def create_app(
     return app
 
 
+_LOCAL_VERSION: str | None = None
+
+
 def _read_local_version() -> str:
-    version_file = Path(__file__).resolve().parent.parent.parent / "VERSION"
-    try:
-        return version_file.read_text().strip()
-    except FileNotFoundError:
-        return "0.0.0"
+    global _LOCAL_VERSION
+    if _LOCAL_VERSION is None:
+        version_file = Path(__file__).resolve().parent.parent.parent / "VERSION"
+        try:
+            _LOCAL_VERSION = version_file.read_text().strip()
+        except FileNotFoundError:
+            _LOCAL_VERSION = "0.0.0"
+    return _LOCAL_VERSION
 
 
 def _get_github_repo() -> str | None:

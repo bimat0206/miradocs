@@ -140,7 +140,7 @@ export function Workspace() {
   const documentsQuery = useQuery({
     queryKey: ["documents"],
     queryFn: listDocuments,
-    refetchInterval: 5000,
+    refetchInterval: false,
   });
   const documents = documentsQuery.data?.documents ?? [];
   const selectedDoc = useMemo(
@@ -173,29 +173,31 @@ export function Workspace() {
     }
   }, [compareDocIds, compareDocs, crossSearchDocIds, crossSearchDocs, documents.length]);
 
+  const sseConnected = Boolean(eventSourceRef.current);
+
   const documentQuery = useQuery({
     queryKey: ["document", selectedDoc?.doc_id],
     queryFn: () => getDocument(selectedDoc!.doc_id),
     enabled: Boolean(selectedDoc),
-    refetchInterval: activeTab === "Process" ? 4000 : false,
+    refetchInterval: false,
   });
   const pipelineQuery = useQuery({
     queryKey: ["pipeline", selectedDoc?.doc_id],
     queryFn: () => getPipeline(selectedDoc!.doc_id),
     enabled: Boolean(selectedDoc),
-    refetchInterval: activeTab === "Process" ? 3000 : false,
+    refetchInterval: false,
   });
   const runsQuery = useQuery({
     queryKey: ["pipeline-runs", selectedDoc?.doc_id],
     queryFn: () => getPipelineRuns(selectedDoc!.doc_id),
     enabled: Boolean(selectedDoc),
-    refetchInterval: activeTab === "Process" ? 5000 : false,
+    refetchInterval: false,
   });
   const activePipelineQuery = useQuery({
     queryKey: ["pipeline-active", selectedDoc?.doc_id],
     queryFn: () => getActivePipeline(selectedDoc!.doc_id),
-    enabled: Boolean(selectedDoc),
-    refetchInterval: activeTab === "Process" ? 3000 : false,
+    enabled: Boolean(selectedDoc) && activeTab === "Process",
+    refetchInterval: activeTab === "Process" && !sseConnected ? 3000 : false,
   });
   const indexStatusQuery = useQuery({
     queryKey: ["index-status", selectedDoc?.doc_id],

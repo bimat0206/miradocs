@@ -23,6 +23,16 @@ from src.intake.file_manager import (
 
 logger = logging.getLogger(__name__)
 
+_registry_singleton = None
+
+
+def _get_registry_singleton():
+    global _registry_singleton
+    if _registry_singleton is None:
+        from src.intake.document_registry import DocumentRegistry
+        _registry_singleton = DocumentRegistry()
+    return _registry_singleton
+
 
 class PageImageEvidence:
     """Retrieves and assembles page-level evidence for search results."""
@@ -34,8 +44,10 @@ class PageImageEvidence:
         else:
             self.doc_ids = list(doc_id)
             self.doc_id = self.doc_ids[0] if self.doc_ids else ""
-        
+
         self._doc_data = {}
+        # Per-doc cached page text: {doc_id: {page_number: str}}
+        self._page_text_cache: dict[str, dict[int, str]] = {}
         for d_id in self.doc_ids:
             self._ensure_doc_loaded(d_id)
 
@@ -144,36 +156,35 @@ class PageImageEvidence:
         tables_index = self._doc_data.get(doc_id, {}).get("tables_index", [])
         return [t for t in tables_index if t.get("page") == page_number]
 
-    def _get_page_text(self, doc_id: str, page_number: int) -> str:
-        """Get extracted text for a page from the raw PDF."""
+    def _load_page_text_cache(self, doc_id: str):
+        """Load all page text for a doc into memory once."""
+        if doc_id in self._page_text_cache:
+            return
         raw_path = self._find_raw_file(doc_id)
-        if not raw_path or not raw_path.exists():
-            return ""
-        try:
-            doc = fitz.open(str(raw_path))
-            if page_number <= len(doc):
-                text = doc[page_number - 1].get_text("text")
-                doc.close()
-                return text
-            doc.close()
-        except Exception:
-            pass
-        return ""
+        cache: dict[int, str] = {}
+        if raw_path and raw_path.exists() and raw_path.suffix.lower() == ".pdf":
+            try:
+                pdf = fitz.open(str(raw_path))
+                for i, page in enumerate(pdf, start=1):
+                    cache[i] = page.get_text("text")
+                pdf.close()
+            except Exception:
+                pass
+        self._page_text_cache[doc_id] = cache
+
+    def _get_page_text(self, doc_id: str, page_number: int) -> str:
+        self._load_page_text_cache(doc_id)
+        return self._page_text_cache.get(doc_id, {}).get(page_number, "")
 
     def _get_nearby_text(self, doc_id: str, page_number: int, context_pages: int = 1) -> str:
-        """Get text from the target page and surrounding pages."""
-        raw_path = self._find_raw_file(doc_id)
-        if not raw_path or not raw_path.exists():
-            return ""
-        try:
-            doc = fitz.open(str(raw_path))
-            parts = []
-            for pg in range(max(1, page_number - context_pages), min(len(doc) + 1, page_number + context_pages + 1)):
-                parts.append(doc[pg - 1].get_text("text"))
-            doc.close()
-            return "\n".join(parts)
-        except Exception:
-            return ""
+        self._load_page_text_cache(doc_id)
+        cache = self._page_text_cache.get(doc_id, {})
+        parts = [
+            cache[pg]
+            for pg in range(max(1, page_number - context_pages), page_number + context_pages + 1)
+            if pg in cache
+        ]
+        return "\n".join(parts)
 
     def _get_figure_ocr(self, fig: dict) -> str:
         """Get OCR text for a figure (from cropped image if available)."""
@@ -209,8 +220,7 @@ class PageImageEvidence:
             from src.ui.state import get_registry
             registry = get_registry()
         except Exception:
-            from src.intake.document_registry import DocumentRegistry
-            registry = DocumentRegistry()
+            registry = _get_registry_singleton()
         doc = registry.get_document(doc_id)
         if not doc:
             return None

@@ -23,6 +23,7 @@ from src.retrieval.retrieval_service import RetrievalService
 logger = logging.getLogger("mcp.tools")
 
 _retrieval: RetrievalService | None = None
+_registry = None
 
 
 def get_retrieval_service() -> RetrievalService:
@@ -33,8 +34,11 @@ def get_retrieval_service() -> RetrievalService:
 
 
 def _get_registry():
-    from src.intake.document_registry import DocumentRegistry
-    return DocumentRegistry()
+    global _registry
+    if _registry is None:
+        from src.intake.document_registry import DocumentRegistry
+        _registry = DocumentRegistry()
+    return _registry
 
 
 def _load_json(path: Path) -> dict | list | None:
@@ -87,17 +91,29 @@ def list_documents(params: ListDocsInput) -> ListDocsOutput:
     if params.tag:
         docs = [d for d in docs if params.tag.casefold() in [t.casefold() for t in d.get("tags", [])]]
 
-    summaries = []
-    for d in docs:
-        # Try to get page count from manifest
-        manifest = _load_json(get_data_dir() / "parsed" / d["doc_id"] / "doc_manifest.json")
-        page_count = manifest.get("page_count", 0) if isinstance(manifest, dict) else 0
-        summaries.append(DocSummary(
+    data_dir = get_data_dir()
+
+    def _page_count(doc_id: str) -> int:
+        path = data_dir / "parsed" / doc_id / "doc_manifest.json"
+        if not path.exists():
+            return 0
+        try:
+            text = path.read_text(encoding="utf-8")
+            import re
+            m = re.search(r'"page_count"\s*:\s*(\d+)', text)
+            return int(m.group(1)) if m else 0
+        except Exception:
+            return 0
+
+    summaries = [
+        DocSummary(
             doc_id=d["doc_id"], filename=d["filename"], project=d["project"],
             document_type=d["document_type"], domain=d["domain"],
-            sensitivity=d["sensitivity"], page_count=page_count,
+            sensitivity=d["sensitivity"], page_count=_page_count(d["doc_id"]),
             status=d["status"], upload_time=d["upload_time"],
-        ))
+        )
+        for d in docs
+    ]
 
     return ListDocsOutput(count=len(summaries), documents=summaries)
 

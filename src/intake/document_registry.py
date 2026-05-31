@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS pipeline_run_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_run_events_run_id ON pipeline_run_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_steps_doc_id ON pipeline_steps(doc_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_doc_id ON pipeline_runs(doc_id);
+CREATE INDEX IF NOT EXISTS idx_compare_findings_run_id ON compare_findings(run_id);
 
 CREATE TABLE IF NOT EXISTS compare_runs (
     run_id TEXT PRIMARY KEY,
@@ -175,6 +178,18 @@ class DocumentRegistry:
             ).fetchone()
             return self._row_to_document(row) if row else None
 
+    def get_documents_batch(self, doc_ids: list[str]) -> list[dict]:
+        """Return docs for all given doc_ids in a single query."""
+        if not doc_ids:
+            return []
+        placeholders = ",".join("?" for _ in doc_ids)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM documents WHERE doc_id IN ({placeholders})",
+                doc_ids,
+            ).fetchall()
+        return [self._row_to_document(r) for r in rows]
+
     def list_documents(self) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -200,6 +215,21 @@ class DocumentRegistry:
                 (doc_id,)
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def get_pipeline_status_batch(self, doc_ids: list[str]) -> dict[str, list[dict]]:
+        """Return {doc_id: [steps]} for all given doc_ids in a single query."""
+        if not doc_ids:
+            return {}
+        placeholders = ",".join("?" for _ in doc_ids)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM pipeline_steps WHERE doc_id IN ({placeholders}) ORDER BY doc_id, id",
+                doc_ids,
+            ).fetchall()
+        result: dict[str, list[dict]] = {d: [] for d in doc_ids}
+        for r in rows:
+            result[r["doc_id"]].append(dict(r))
+        return result
 
     def update_step(
         self, doc_id: str, step_name: str, status: str,
@@ -295,25 +325,29 @@ class DocumentRegistry:
                 LIMIT ?""",
                 (doc_id, limit),
             ).fetchall()
-            runs = []
-            for row in rows:
-                run = dict(row)
-                run["result"] = json.loads(run.pop("result_json")) if run.get("result_json") else None
-                event_rows = conn.execute(
-                    """SELECT event_type, timestamp, payload_json
-                    FROM pipeline_run_events
-                    WHERE run_id = ?
-                    ORDER BY id""",
-                    (run["run_id"],),
-                ).fetchall()
-                run["events"] = [
-                    {**dict(event_row), "payload": json.loads(event_row["payload_json"])}
-                    for event_row in event_rows
-                ]
-                for event in run["events"]:
-                    event.pop("payload_json", None)
-                runs.append(run)
-            return runs
+            if not rows:
+                return []
+            run_ids = [r["run_id"] for r in rows]
+            placeholders = ",".join("?" for _ in run_ids)
+            event_rows = conn.execute(
+                f"""SELECT run_id, event_type, timestamp, payload_json
+                FROM pipeline_run_events
+                WHERE run_id IN ({placeholders})
+                ORDER BY id""",
+                run_ids,
+            ).fetchall()
+        events_by_run: dict[str, list[dict]] = {rid: [] for rid in run_ids}
+        for ev in event_rows:
+            entry = dict(ev)
+            entry["payload"] = json.loads(entry.pop("payload_json"))
+            events_by_run[ev["run_id"]].append(entry)
+        runs = []
+        for row in rows:
+            run = dict(row)
+            run["result"] = json.loads(run.pop("result_json")) if run.get("result_json") else None
+            run["events"] = events_by_run.get(run["run_id"], [])
+            runs.append(run)
+        return runs
 
     def get_latest_pipeline_run(
         self,
@@ -345,8 +379,8 @@ class DocumentRegistry:
                 (run["run_id"],),
             ).fetchall()
             run["events"] = [
-                {**dict(event_row), "payload": json.loads(event_row["payload_json"])}
-                for event_row in event_rows
+                {**dict(ev), "payload": json.loads(ev["payload_json"])}
+                for ev in event_rows
             ]
             for event in run["events"]:
                 event.pop("payload_json", None)
