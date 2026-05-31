@@ -14,6 +14,7 @@
 - [Setup](#setup)
 - [Run](#run)
 - [Cleanup](#cleanup)
+- [Export & Import](#export--import)
 - [MCP Server — Connect Your AI Client](#mcp-server--connect-your-ai-client)
 - [Auto-Update](#auto-update)
 - [Configuration](#configuration)
@@ -54,10 +55,11 @@ MiraDocs parses your documents locally, builds a structured knowledge base, and 
 | **MCP integration** | 16 tools exposed to Claude, ChatGPT, Gemini, Cursor, Windsurf, Codex |
 | **100% local** | No cloud, no API keys required to run the pipeline |
 | **Artifact export** | manifest, structure, quality, chunks, entities, relations, markdown, tables, figures |
+| **Workspace export/import** | Export full workspace (DB + artifacts + vector index) as a ZIP; import on any machine with merge or replace |
 
 ### Workspace views
 
-- **Library** — Upload, search, tag, select, and delete documents. Paginated with multi-select.
+- **Library** — Upload, search, tag, select, and delete documents. Paginated with multi-select. Export all or selected documents as a ZIP; import from another machine.
 - **Process** — Run the 10-step pipeline with live progress bar, ETA, and streaming logs.
 - **Tag** — Add up to 5 custom tags per document, available before and after processing.
 - **Inspect** — Page images at full size, structure tree, quality signals, tables, and figures.
@@ -138,6 +140,59 @@ python3 cleanup.py --full       # everything
 ```
 
 > `--data` requires typing `delete` at the confirmation prompt — it wipes all uploaded files, parsed output, page images, indexes, and the registry database.
+
+---
+
+## Export & Import
+
+Move your entire workspace — documents, parsed artifacts, and vector index — to another machine without re-running the pipeline.
+
+### Export
+
+Click **Export all** in the library sidebar to download a ZIP of everything. To export specific documents, select them first — the button changes to **Export (N)**.
+
+The ZIP contains:
+- `registry.db` — SQLite database with all document metadata and pipeline state
+- `data/raw/` — original uploaded files
+- `data/parsed/` — parsed artifacts (chunks, entities, relations, structure, quality reports)
+- `data/page_images/`, `data/tables/`, `data/figures/` — rendered pages and extracted assets
+- `data/indexes/` — local Qdrant vector index (embeddings included, no re-indexing needed)
+- `miradocs_export.json` — manifest with version, timestamp, and doc list
+
+You can also trigger export directly from the API:
+```bash
+# Export all
+curl -o workspace.zip http://localhost:8000/api/export
+
+# Export specific documents
+curl -o workspace.zip "http://localhost:8000/api/export?doc_ids=abc123,def456"
+```
+
+### Import
+
+Click **Import** in the library sidebar and select a `.zip` file exported by MiraDocs.
+
+Two modes (default: merge):
+
+| Mode | Behaviour |
+|---|---|
+| **Merge** (default) | Adds documents from the ZIP that don't already exist (matched by SHA-256). Safe to run multiple times. |
+| **Replace** | Wipes the current workspace and restores from the ZIP. |
+
+After import the document list refreshes automatically. A banner shows how many documents were imported and how many were skipped as duplicates.
+
+Via API:
+```bash
+# Import with merge (default)
+curl -X POST http://localhost:8000/api/import \
+  -F "file=@workspace.zip" \
+  -F "merge=true"
+
+# Import with replace
+curl -X POST http://localhost:8000/api/import \
+  -F "file=@workspace.zip" \
+  -F "merge=false"
+```
 
 ---
 
