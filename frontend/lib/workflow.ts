@@ -94,3 +94,22 @@ export function statusTone(status?: string) {
   if (status === "running" || status === "warning" || status === "READY_WITH_WARNINGS") return "warn";
   return "idle";
 }
+
+const STATUS_LABELS: Record<string, string> = {
+  READY: "Ready",
+  NOT_READY: "Low quality",
+  READY_WITH_WARNINGS: "Ready (warnings)",
+  success: "Success",
+  done: "Done",
+  failed: "Failed",
+  running: "Running",
+  pending: "Pending",
+  uploaded: "Uploaded",
+  queued: "Queued",
+  warning: "Warning",
+};
+
+export function statusLabel(status?: string): string {
+  if (!status) return "Unknown";
+  return STATUS_LABELS[status] ?? status;
+}

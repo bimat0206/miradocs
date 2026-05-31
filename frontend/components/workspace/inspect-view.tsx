@@ -9,6 +9,7 @@ import { ImageLightbox } from "@/components/ui/image-lightbox";
 import { InsightPanel } from "@/components/ui/insight-panel";
 import { TablePreview } from "./table-preview";
 import { figureImageUrl, getArtifact, pageImageUrl } from "@/lib/api";
+import { statusLabel } from "@/lib/workflow";
 import type {
   DocumentRecord,
   FigureArtifact,
@@ -178,7 +179,7 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
       <section className="flex flex-col gap-5 lg:h-full lg:min-h-0 overflow-y-auto">
         <InsightPanel icon={<ShieldCheck size={18} />} title="Quality">
           <p className="mb-3 text-sm text-slate-400">
-            Status: <span className="text-cyan-200">{qualityQuery.data?.status ?? "not available"}</span>
+            Status: <span className="text-cyan-200">{qualityQuery.data?.status ? statusLabel(qualityQuery.data.status) : "not available"}</span>
           </p>
           <div className="grid grid-cols-2 gap-3">
             {Object.entries(qualityQuery.data?.summary ?? {})

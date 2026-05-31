@@ -1,6 +1,6 @@
 "use client";
 
-import { statusTone } from "@/lib/workflow";
+import { statusLabel, statusTone } from "@/lib/workflow";
 
 export function StatusPill({ status }: { status?: string }) {
   const tone = statusTone(status);
@@ -14,7 +14,7 @@ export function StatusPill({ status }: { status?: string }) {
     <span
       className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] ${classes}`}
     >
-      {status ?? "pending"}
+      {statusLabel(status)}
     </span>
   );
 }

@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.1 - 2026-05-31
+
+### Fixed
+- **Raw status strings shown in UI**: `NOT_READY`, `READY_WITH_WARNINGS`, `done`, `queued`, etc. were displayed verbatim throughout the app. Added `statusLabel()` mapper in `workflow.ts` and applied it in `StatusPill`, the Inspect quality panel, and the Process view run history. Display values: `NOT_READY` → "Low quality", `READY_WITH_WARNINGS` → "Ready (warnings)", `READY` → "Ready", `done` → "Done", etc.
+- **"result NOT_READY" in run history**: process view run history row now shows "quality: Low quality" instead of the raw backend key.
+
+### Note
+`NOT_READY` on a fully-pipelined document is **expected behavior** — it means the quality checker found fewer than 50% of pages had extractable text (common for image-heavy DOCX files). The document is still indexed and searchable; the status is a signal that search quality may be lower.
+
+---
+
 ## v1.5.0 - 2026-05-31
 
 ### Added

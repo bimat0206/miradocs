@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { StatusPill } from "@/components/ui/status-pill";
 import { PipelineProgressCard } from "./pipeline-progress-card";
 import type { JobEvent, PipelineRun, PipelineStep } from "@/lib/types";
-import { formatDuration, type pipelineProgress } from "@/lib/workflow";
+import { formatDuration, statusLabel, type pipelineProgress } from "@/lib/workflow";
 
 interface ProcessViewProps {
   steps: PipelineStep[];
@@ -408,7 +408,7 @@ export function ProcessView({
                             <span>{formatDuration(run.duration_seconds)}</span>
                           )}
                           {typeof run.result?.status === "string" && (
-                            <span>result {run.result.status}</span>
+                            <span>quality: {statusLabel(run.result.status)}</span>
                           )}
                           {typeof run.result?.chunks === "number" && (
                             <span>{String(run.result.chunks)} chunks</span>
