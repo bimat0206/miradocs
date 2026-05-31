@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.5 - 2026-05-31
+
+### Fixed
+- **App crash on startup: `sqlite3.OperationalError: no such table: main.compare_findings`**: `CREATE INDEX idx_compare_findings_run_id` was placed before the `compare_findings` table definition in `SCHEMA`. SQLite `executescript` runs statements in order — the index creation failed because the table didn't exist yet. Moved the index to after `compare_findings`.
+
+---
+
 ## v1.5.4 - 2026-05-31
 
 ### Changed

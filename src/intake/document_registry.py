@@ -61,7 +61,6 @@ CREATE TABLE IF NOT EXISTS pipeline_run_events (
 CREATE INDEX IF NOT EXISTS idx_pipeline_run_events_run_id ON pipeline_run_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_pipeline_steps_doc_id ON pipeline_steps(doc_id);
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_doc_id ON pipeline_runs(doc_id);
-CREATE INDEX IF NOT EXISTS idx_compare_findings_run_id ON compare_findings(run_id);
 
 CREATE TABLE IF NOT EXISTS compare_runs (
     run_id TEXT PRIMARY KEY,
@@ -94,6 +93,7 @@ CREATE TABLE IF NOT EXISTS compare_findings (
     FOREIGN KEY (run_id) REFERENCES compare_runs(run_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_compare_findings_run_id ON compare_findings(run_id);
 
 """
 
