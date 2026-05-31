@@ -375,7 +375,7 @@ TOOLS = [
 
 SERVER_INFO = {
     "name": "miradocs",
-    "version": "1.5.0",
+    "version": "1.5.3",
     "protocolVersion": "2024-11-05",
 }
 
