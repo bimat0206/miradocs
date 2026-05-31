@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.3 - 2026-05-31
+
+### Fixed
+- **Qdrant "already accessed by another instance" error**: Qdrant local file mode uses an exclusive OS-level lock per process. Multiple `QdrantAdapter()` instantiations within the same process each tried to open the path independently, and any second OS process (e.g. MCP server alongside API server) would also conflict.
+  - **Within one process**: `QdrantAdapter` now uses a module-level `_client` singleton (double-checked lock). All adapter instances share one `QdrantClient` — one lock, no conflict.
+  - **Across processes** (API server + MCP server running simultaneously): set `qdrant_url: "http://localhost:6333"` in `config/settings.yaml` to switch to Qdrant HTTP server mode. Both processes connect as HTTP clients — no file lock. See the added comment in `settings.yaml`.
+
+---
+
 ## v1.5.2 - 2026-05-31
 
 ### Fixed

@@ -1,18 +1,37 @@
 """Qdrant indexing adapter with Ollama BGE-M3 embeddings."""
 import logging
+import threading
 from typing import Any
 
 import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance, PointStruct, VectorParams, Filter, FieldCondition, MatchValue, MatchAny
-
 )
 
 from src.config import get_config, get_data_dir
 from src.indexing.index_adapter import IndexAdapter
 
 logger = logging.getLogger(__name__)
+
+# Module-level singleton client — Qdrant local uses an exclusive file lock per
+# process. All QdrantAdapter instances within the same process must share one
+# QdrantClient to avoid "already accessed by another instance" errors.
+_client: QdrantClient | None = None
+_client_lock = threading.Lock()
+
+
+def _get_client(qdrant_path: str, qdrant_url: str | None = None) -> QdrantClient:
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                if qdrant_url:
+                    logger.info("Connecting to Qdrant server at %s", qdrant_url)
+                    _client = QdrantClient(url=qdrant_url)
+                else:
+                    _client = QdrantClient(path=qdrant_path)
+    return _client
 
 
 class QdrantAdapter(IndexAdapter):
@@ -24,7 +43,8 @@ class QdrantAdapter(IndexAdapter):
         self.embed_model = cfg["embedding"]["model"]
 
         qdrant_path = str(get_data_dir() / "indexes" / "qdrant")
-        self.client = QdrantClient(path=qdrant_path)
+        qdrant_url = cfg["indexing"].get("qdrant_url") or None
+        self.client = _get_client(qdrant_path, qdrant_url)
         self._ensure_collection()
 
     def _ensure_collection(self):
