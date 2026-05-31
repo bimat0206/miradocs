@@ -202,7 +202,7 @@ export function Workspace() {
   const indexStatusQuery = useQuery({
     queryKey: ["index-status", selectedDoc?.doc_id],
     queryFn: () => getIndexStatus(selectedDoc!.doc_id),
-    enabled: Boolean(selectedDoc),
+    enabled: Boolean(selectedDoc) && activeTab === "Index",
     refetchInterval: activeTab === "Index" ? 5000 : false,
   });
 
