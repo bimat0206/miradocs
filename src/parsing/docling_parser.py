@@ -139,6 +139,8 @@ def parse_with_docling(file_path: Path) -> dict[str, Any]:
         tables = _extract_tables(doc_dict)
         figures = _extract_figures(doc_dict)
         page_count = _get_page_count(doc_dict)
+        if page_count == 0 and markdown.strip():
+            page_count = 1
 
         return {
             "markdown": markdown,

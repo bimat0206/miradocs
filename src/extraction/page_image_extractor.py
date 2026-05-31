@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 def extract_page_images(file_path: Path, doc_id: str) -> list[dict]:
     """Render each page as PNG. Returns list of page image metadata in page order."""
+    if file_path.suffix.lower() != ".pdf":
+        logger.info("Skipping page image rendering for non-PDF file: %s", file_path)
+        return []
+
     cfg = get_config()
     dpi = int(cfg["parsing"]["page_image_dpi"])
     workers_cfg = int(cfg["parsing"].get("page_image_workers", 0) or 0)

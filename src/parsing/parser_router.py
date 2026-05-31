@@ -1,4 +1,4 @@
-"""Parser router - tries Docling first, falls back to PyMuPDF."""
+"""Parser router - tries Docling first, falls back to format-specific parsers."""
 import json
 import logging
 from pathlib import Path
@@ -15,7 +15,9 @@ def parse_document(file_path: Path, doc_id: str) -> dict[str, Any]:
 
     if file_type == ".pdf":
         result = _parse_pdf(file_path)
-    elif file_type in (".docx", ".pptx", ".xlsx"):
+    elif file_type == ".docx":
+        result = _parse_docx(file_path)
+    elif file_type in (".pptx", ".xlsx"):
         result = _parse_with_docling_or_fail(file_path)
     elif file_type in (".md", ".txt"):
         result = _parse_text(file_path)
@@ -46,8 +48,19 @@ def _parse_pdf(file_path: Path) -> dict[str, Any]:
         return parse_with_pymupdf(file_path)
 
 
+def _parse_docx(file_path: Path) -> dict[str, Any]:
+    """Try Docling first, fall back to python-docx."""
+    try:
+        from src.parsing.docling_parser import parse_with_docling
+        return parse_with_docling(file_path)
+    except Exception as e:
+        logger.warning(f"Docling failed ({e}), falling back to python-docx")
+        from src.parsing.docx_fallback import parse_with_docx
+        return parse_with_docx(file_path)
+
+
 def _parse_with_docling_or_fail(file_path: Path) -> dict[str, Any]:
-    """Use Docling for non-PDF formats (DOCX, PPTX, XLSX)."""
+    """Use Docling for formats without a local fallback."""
     try:
         from src.parsing.docling_parser import parse_with_docling
         return parse_with_docling(file_path)
