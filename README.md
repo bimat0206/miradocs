@@ -344,6 +344,8 @@ It should call `list_documents` and return your library.
 | `put_compare` | Create a deterministic compare run for two processed documents |
 | `get_entity_graph` | Entity co-occurrence graph (nodes + edges) for a document |
 | `get_entity_relationships` | All entities connected to a named entity in the document graph |
+| `export_workspace` | Export full workspace (DB + artifacts + vector index) to a ZIP file on disk |
+| `import_workspace` | Import a workspace ZIP — merge (skip duplicates) or replace mode |
 
 #### Using `graph_local` search
 

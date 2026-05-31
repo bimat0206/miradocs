@@ -252,6 +252,47 @@ class GetEntityGraphOutput(BaseModel):
     edges: list[GraphEdge] = Field(default_factory=list)
 
 
+# ─── export_workspace ────────────────────────────────────────────────────────
+
+class ExportWorkspaceInput(BaseModel):
+    output_path: str | None = Field(
+        default=None,
+        description="Absolute path to write the ZIP file. Auto-generated in data/exports/ if omitted.",
+    )
+    doc_ids: list[str] | None = Field(
+        default=None,
+        description="Export only these document IDs. Omit to export all documents.",
+    )
+
+
+class ExportWorkspaceOutput(BaseModel):
+    path: str
+    size_mb: float
+    doc_count: int
+    exported_at: str
+
+
+# ─── import_workspace ────────────────────────────────────────────────────────
+
+class ImportWorkspaceInput(BaseModel):
+    path: str = Field(..., description="Absolute path to the MiraDocs export ZIP file.")
+    merge: bool = Field(
+        default=True,
+        description="True (default): skip documents already present by SHA-256. False: wipe and replace.",
+    )
+
+
+class ImportWorkspaceOutput(BaseModel):
+    status: str
+    export_version: str
+    exported_at: str
+    imported_docs: int
+    skipped_docs: int
+    files_written: int
+    doc_ids_imported: list[str] = Field(default_factory=list)
+    doc_ids_skipped: list[str] = Field(default_factory=list)
+
+
 # ─── get_entity_relationships ─────────────────────────────────────────────────
 
 class GetEntityRelationshipsInput(BaseModel):

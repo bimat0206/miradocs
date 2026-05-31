@@ -17,6 +17,8 @@ from src.mcp.schemas import (
     PutCrossSearchInput, PutCompareInput,
     GetEntityGraphInput, GetEntityGraphOutput, GraphNode, GraphEdge,
     GetEntityRelationshipsInput, GetEntityRelationshipsOutput, EntityRelationship,
+    ExportWorkspaceInput, ExportWorkspaceOutput,
+    ImportWorkspaceInput, ImportWorkspaceOutput,
 )
 from src.retrieval.retrieval_service import RetrievalService
 
@@ -535,6 +537,97 @@ def get_entity_relationships(params: GetEntityRelationshipsInput) -> GetEntityRe
         neighbor_count=len(relationships),
         relationships=relationships,
     )
+
+
+# ─── export_workspace ─────────────────────────────────────────────────────────
+
+def export_workspace(params: ExportWorkspaceInput) -> ExportWorkspaceOutput | dict:
+    """Export the full workspace (DB + artifacts + vector index) to a ZIP file."""
+    import os
+    from datetime import datetime, timezone
+    from src.services.export_service import export_workspace_to_file
+
+    data_dir = get_data_dir()
+
+    if params.output_path:
+        dest = Path(params.output_path)
+    else:
+        exports_dir = data_dir / "exports"
+        exports_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        dest = exports_dir / f"miradocs-export-{ts}.zip"
+
+    if params.doc_ids:
+        registry = _get_registry()
+        missing = [d for d in params.doc_ids if not registry.get_document(d)]
+        if missing:
+            return {"error": f"Documents not found: {missing}"}
+
+    try:
+        export_workspace_to_file(
+            dest,
+            data_dir=data_dir,
+            doc_ids=params.doc_ids,
+        )
+    except Exception as exc:
+        return {"error": f"Export failed: {exc}"}
+
+    size_mb = round(dest.stat().st_size / 1_048_576, 2)
+
+    import zipfile, json as _json
+    doc_count = 0
+    exported_at = ""
+    try:
+        with zipfile.ZipFile(dest) as zf:
+            manifest = _json.loads(zf.read("miradocs_export.json"))
+            doc_count = manifest.get("doc_count", 0)
+            exported_at = manifest.get("exported_at", "")
+    except Exception:
+        pass
+
+    logger.info("export_workspace: wrote %s (%.1f MB, %d docs)", dest, size_mb, doc_count)
+    return ExportWorkspaceOutput(
+        path=str(dest),
+        size_mb=size_mb,
+        doc_count=doc_count,
+        exported_at=exported_at,
+    )
+
+
+# ─── import_workspace ─────────────────────────────────────────────────────────
+
+def import_workspace(params: ImportWorkspaceInput) -> ImportWorkspaceOutput | dict:
+    """Import a workspace ZIP exported by export_workspace."""
+    from src.services.export_service import import_workspace as _import
+
+    src = Path(params.path)
+    if not src.exists():
+        return {"error": f"File not found: {params.path}"}
+    if not src.suffix.lower() == ".zip":
+        return {"error": "File must be a .zip archive"}
+
+    try:
+        result = _import(
+            src.read_bytes(),
+            data_dir=get_data_dir(),
+            merge=params.merge,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": f"Import failed: {exc}"}
+
+    # Invalidate registry singleton so newly imported docs are visible
+    import src.indexing.page_evidence as _pe_mod
+    _pe_mod._registry_singleton = None
+    global _registry
+    _registry = None
+
+    logger.info(
+        "import_workspace: imported=%d skipped=%d files=%d",
+        result["imported_docs"], result["skipped_docs"], result["files_written"],
+    )
+    return ImportWorkspaceOutput(**result)
 
 
 # ─── Helper ──────────────────────────────────────────────────────────────────

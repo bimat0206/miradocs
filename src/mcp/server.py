@@ -324,11 +324,58 @@ TOOLS = [
             "required": ["doc_id", "entity_type", "entity_value"],
         },
     },
+    {
+        "name": "export_workspace",
+        "description": (
+            "Export the full MiraDocs workspace — SQLite registry, all document artifacts, "
+            "and the local vector index — to a ZIP file on disk. "
+            "Returns the path to the ZIP file and its size. "
+            "Use import_workspace on another machine to restore."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "output_path": {
+                    "type": "string",
+                    "description": "Absolute path to write the ZIP file. Auto-generated in data/exports/ if omitted.",
+                },
+                "doc_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Export only these document IDs. Omit to export all documents.",
+                },
+            },
+        },
+    },
+    {
+        "name": "import_workspace",
+        "description": (
+            "Import a MiraDocs workspace ZIP created by export_workspace. "
+            "Merge mode (default): adds documents not already present, skips duplicates by SHA-256. "
+            "Replace mode: wipes the current workspace and restores from the ZIP. "
+            "Returns counts of imported and skipped documents."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to the MiraDocs export ZIP file.",
+                },
+                "merge": {
+                    "type": "boolean",
+                    "description": "True (default): skip documents already present by SHA-256. False: wipe and replace.",
+                    "default": True,
+                },
+            },
+            "required": ["path"],
+        },
+    },
 ]
 
 SERVER_INFO = {
     "name": "miradocs",
-    "version": "1.1.4",
+    "version": "1.5.0",
     "protocolVersion": "2024-11-05",
 }
 
@@ -371,6 +418,8 @@ def handle_tools_call(id, params: dict) -> dict:
             "put_compare": (schemas.PutCompareInput, tools.put_compare),
             "get_entity_graph": (schemas.GetEntityGraphInput, tools.get_entity_graph),
             "get_entity_relationships": (schemas.GetEntityRelationshipsInput, tools.get_entity_relationships),
+            "export_workspace": (schemas.ExportWorkspaceInput, tools.export_workspace),
+            "import_workspace": (schemas.ImportWorkspaceInput, tools.import_workspace),
         }
 
         if tool_name not in DISPATCH:

@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.0 - 2026-05-31
+
+### Added
+- **MCP `export_workspace` tool**: exports the full workspace (SQLite DB + all artifacts + Qdrant vector index) to a ZIP file on disk. Accepts optional `output_path` and `doc_ids` for selective export. Returns the file path, size in MB, document count, and export timestamp. Auto-saves to `data/exports/` if no path is given.
+- **MCP `import_workspace` tool**: imports a workspace ZIP produced by `export_workspace`. Merge mode (default) skips documents already present by SHA-256; replace mode wipes and restores. Returns counts of imported/skipped documents. Invalidates the registry singleton so new documents are immediately visible in subsequent MCP tool calls.
+- MCP server version bumped to `1.5.0`.
+
+---
+
 ## v1.4.2 - 2026-05-31
 
 ### Fixed
