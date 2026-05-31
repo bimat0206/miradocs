@@ -153,17 +153,30 @@ class Launcher:
         repo = self.github_repo_from_origin()
         if not repo:
             return False
+
+        self.info("Checking for updates …")
         remote_version = self.remote_main_version(repo)
         if not remote_version or remote_version == local_version:
             return False
 
-        self.header("Startup Update")
-        self.info(f"Update available: {local_version} -> {remote_version}")
-        self.info("Running integrated Python updater before launching MiraDocs")
+        self.header("Update Available")
+        self.info(f"Current version : {local_version}")
+        self.info(f"Latest version  : {remote_version}")
+        print(f"\n{Style.BOLD}  Update now? [y/N] {Style.RESET}", end="", flush=True)
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+
+        if answer not in ("y", "yes"):
+            self.info("Skipping update — continuing with current version")
+            return False
+
+        self.info("Running update …")
         if self.run_update(mode="startup") != 0:
-            self.fail("Startup update failed; see data/update.log for details")
+            self.fail("Update failed; see data/update.log for details")
             raise SystemExit(1)
-        self.info("Restarting MiraDocs from the updated Python launcher")
+        self.info("Restarting MiraDocs from the updated launcher")
         if self.env.get("MIRADOCS_START_UPDATE_ONLY") == "1":
             return True
         os.execvpe(
@@ -451,10 +464,14 @@ class Launcher:
             self.log("Stopping services...")
             self.write_status("updating", "Stopping services...", current_version)
             marker.write_text(f"{os.getpid()}\n", encoding="utf-8")
+            # Kill by port first (most reliable) then fall back to pattern
+            for port in [self.API_PORT, self.WEB_PORT]:
+                for pid in self.port_pids(port):
+                    self.kill_pid(pid, signal.SIGTERM)
             for pattern in [
                 "uvicorn src.api.main:app",
-                "next dev.*--port 3000",
-                "next start.*--port 3000",
+                "next dev",
+                "next start",
             ]:
                 self.run(["pkill", "-f", pattern], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(2 if not startup_mode else 0)

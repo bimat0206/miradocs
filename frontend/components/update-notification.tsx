@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE } from "../lib/api";
 import {
   formatUpdateAvailableMessage,
@@ -38,14 +38,23 @@ export function UpdateNotification() {
     check();
   }, []);
 
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clear interval on unmount
+  useEffect(() => () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  }, []);
+
   // Poll update status after triggering update.
   const pollUpdateStatus = useCallback(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
     let attempts = 0;
     const maxAttempts = 60; // 3s * 60 = 3 min max wait
-    const interval = setInterval(async () => {
+    intervalRef.current = setInterval(async () => {
       attempts++;
       if (attempts > maxAttempts) {
-        clearInterval(interval);
+        clearInterval(intervalRef.current!);
+        intervalRef.current = null;
         setState("failed");
         setMessage("Update timed out. Check logs.");
         return;
@@ -59,7 +68,8 @@ export function UpdateNotification() {
             return;
           }
           if (isTerminalUpdateStatus(data.status)) {
-            clearInterval(interval);
+            clearInterval(intervalRef.current!);
+            intervalRef.current = null;
             setState(data.status);
             setMessage(data.status === "success"
               ? `Updated to ${formatVersionLabel(data.version || remoteVersion)}`
