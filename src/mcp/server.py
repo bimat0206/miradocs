@@ -373,9 +373,17 @@ TOOLS = [
     },
 ]
 
+def _read_version() -> str:
+    version_file = Path(__file__).resolve().parent.parent.parent / "VERSION"
+    try:
+        return version_file.read_text().strip()
+    except FileNotFoundError:
+        return "0.0.0"
+
+
 SERVER_INFO = {
     "name": "miradocs",
-    "version": "1.5.3",
+    "version": _read_version(),
     "protocolVersion": "2024-11-05",
 }
 

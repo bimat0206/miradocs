@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.4 - 2026-05-31
+
+### Changed
+- **Centralized version**: `VERSION` file is now the single source of truth. `src/mcp/server.py` `SERVER_INFO["version"]` now reads from `VERSION` at startup instead of being hardcoded. `src/api/main.py` already did this via `_read_local_version()`.
+
+---
+
 ## v1.5.3 - 2026-05-31
 
 ### Fixed
