@@ -428,6 +428,7 @@ export function Workspace() {
             onOpenAbout={openAbout}
             onOpenGuide={openGuide}
             onToggle={() => setSidebarOpen(false)}
+            onImportComplete={() => queryClient.invalidateQueries({ queryKey: ["documents"] })}
           />
         </div>
         <section className="relative rounded-[28px] glass gradient-border flex flex-col overflow-hidden lg:h-full min-h-[600px] lg:min-h-0">

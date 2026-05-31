@@ -183,3 +183,34 @@ export function artifactFileUrl(docId: string, artifactType: string, filename: s
 export function jobEventsUrl(jobId: string) {
   return `${API_BASE}/api/jobs/${jobId}/events`;
 }
+
+export function exportWorkspaceUrl(docIds?: string[]) {
+  const base = `${API_BASE}/api/export`;
+  if (docIds && docIds.length > 0) {
+    return `${base}?doc_ids=${encodeURIComponent(docIds.join(","))}`;
+  }
+  return base;
+}
+
+export type ImportResult = {
+  status: string;
+  export_version: string;
+  exported_at: string;
+  imported_docs: number;
+  skipped_docs: number;
+  files_written: number;
+  doc_ids_imported: string[];
+  doc_ids_skipped: string[];
+};
+
+export async function importWorkspace(file: File, merge = true): Promise<ImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("merge", String(merge));
+  const response = await fetch(`${API_BASE}/api/import`, { method: "POST", body: form });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || response.statusText);
+  }
+  return response.json() as Promise<ImportResult>;
+}

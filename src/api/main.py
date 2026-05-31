@@ -1,8 +1,11 @@
 """FastAPI entrypoint for MiraDocs."""
 import json
+import logging
 import threading
 from pathlib import Path
 from typing import Callable, Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -599,6 +602,66 @@ def create_app(
             return json.loads(status_file.read_text())
         except Exception:
             return {"status": "idle", "version": _read_local_version()}
+
+    # ── Export / Import ──────────────────────────────────────────
+
+    @app.get("/api/export")
+    def export_workspace(doc_ids: str | None = None):
+        """Stream a full workspace ZIP archive.
+
+        Optional query param: doc_ids — comma-separated list of doc_ids to
+        include. Omit to export everything.
+        """
+        from src.services.export_service import export_workspace as _export
+
+        selected = [d.strip() for d in doc_ids.split(",") if d.strip()] if doc_ids else None
+        if selected:
+            missing = [d for d in selected if not app.state.registry.get_document(d)]
+            if missing:
+                raise HTTPException(status_code=404, detail=f"Documents not found: {missing}")
+
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        filename = f"miradocs-export-{ts}.zip"
+
+        return StreamingResponse(
+            _export(data_dir=app.state.data_dir, db_path=app.state.registry.db_path, doc_ids=selected),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.post("/api/import")
+    async def import_workspace(
+        file: UploadFile = File(...),
+        merge: bool = Form(True),
+    ):
+        """Import a workspace ZIP exported by /api/export.
+
+        merge=true  — keep existing docs, skip duplicates by sha256 (default).
+        merge=false — wipe and replace.
+        """
+        from src.services.export_service import import_workspace as _import
+
+        content = await file.read()
+        try:
+            result = _import(
+                content,
+                data_dir=app.state.data_dir,
+                db_path=app.state.registry.db_path,
+                merge=merge,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            logger.exception("Import failed")
+            raise HTTPException(status_code=500, detail=f"Import failed: {exc}")
+
+        # Invalidate in-memory singleton so new docs are visible
+        from src.indexing.page_evidence import _get_registry_singleton
+        import src.indexing.page_evidence as _pe_mod
+        _pe_mod._registry_singleton = None
+
+        return result
 
     return app
 

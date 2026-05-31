@@ -4,6 +4,7 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Download,
   GitCompareArrows,
   Info,
   Library,
@@ -16,6 +17,7 @@ import {
 import { type RefObject, useEffect, useMemo, useState } from "react";
 
 import { StatusPill } from "@/components/ui/status-pill";
+import { exportWorkspaceUrl, importWorkspace, type ImportResult } from "@/lib/api";
 import type { DocumentRecord } from "@/lib/types";
 
 const DOCS_PER_PAGE = 8;
@@ -35,6 +37,7 @@ interface LibraryPanelProps {
   onOpenAbout: () => void;
   onOpenGuide: () => void;
   onToggle: () => void;
+  onImportComplete?: () => void;
 }
 
 export function LibraryPanel({
@@ -52,10 +55,42 @@ export function LibraryPanel({
   onOpenAbout,
   onOpenGuide,
   onToggle,
+  onImportComplete,
 }: LibraryPanelProps) {
   const hasSelection = selectedDocIds.length > 0;
   const canCompare = selectedDocIds.length === 2;
   const [query, setQuery] = useState("");
+
+  // Export / Import state
+  const [importState, setImportState] = useState<
+    | { phase: "idle" }
+    | { phase: "importing" }
+    | { phase: "done"; result: ImportResult }
+    | { phase: "error"; message: string }
+  >({ phase: "idle" });
+
+  function handleExport() {
+    const url = hasSelection
+      ? exportWorkspaceUrl(selectedDocIds)
+      : exportWorkspaceUrl();
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  async function handleImportFile(file: File) {
+    setImportState({ phase: "importing" });
+    try {
+      const result = await importWorkspace(file, true);
+      setImportState({ phase: "done", result });
+      onImportComplete?.();
+    } catch (err) {
+      setImportState({ phase: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
   const [page, setPage] = useState(1);
   const filteredDocuments = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -317,7 +352,71 @@ export function LibraryPanel({
           </div>
         )}
       </div>
-      <div className="shrink-0 border-t border-white/10 p-3">
+      <div className="shrink-0 border-t border-white/10 p-3 space-y-2">
+        {/* Export / Import */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={handleExport}
+            title={hasSelection ? `Export ${selectedDocIds.length} selected doc(s)` : "Export all documents"}
+            className="flex items-center justify-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[0.06] px-3 py-2 text-xs font-medium text-cyan-200 transition hover:border-cyan-300/50 hover:bg-cyan-300/10 hover:text-cyan-100"
+          >
+            <Download size={13} />
+            {hasSelection ? `Export (${selectedDocIds.length})` : "Export all"}
+          </button>
+          <label
+            aria-disabled={importState.phase === "importing"}
+            className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-violet-300/25 bg-violet-300/[0.06] px-3 py-2 text-xs font-medium text-violet-200 transition hover:border-violet-300/50 hover:bg-violet-300/10 hover:text-violet-100 ${importState.phase === "importing" ? "cursor-not-allowed opacity-50 pointer-events-none" : ""}`}
+          >
+            <UploadCloud size={13} />
+            {importState.phase === "importing" ? "Importing…" : "Import"}
+            <input
+              type="file"
+              accept=".zip"
+              className="sr-only"
+              disabled={importState.phase === "importing"}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  handleImportFile(f);
+                  e.target.value = "";
+                }
+              }}
+            />
+          </label>
+        </div>
+
+        {/* Import feedback */}
+        {importState.phase === "done" && (
+          <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
+            <p className="font-semibold">Import complete</p>
+            <p className="mt-0.5 text-emerald-300/80">
+              {importState.result.imported_docs} imported · {importState.result.skipped_docs} skipped
+            </p>
+            <button
+              type="button"
+              onClick={() => setImportState({ phase: "idle" })}
+              className="mt-1 text-[11px] text-emerald-400/70 underline hover:text-emerald-300"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        {importState.phase === "error" && (
+          <div className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">
+            <p className="font-semibold">Import failed</p>
+            <p className="mt-0.5 line-clamp-3 text-red-300/80">{importState.message}</p>
+            <button
+              type="button"
+              onClick={() => setImportState({ phase: "idle" })}
+              className="mt-1 text-[11px] text-red-400/70 underline hover:text-red-300"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Guide / About */}
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
