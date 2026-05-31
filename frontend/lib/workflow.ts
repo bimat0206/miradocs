@@ -90,7 +90,7 @@ export function formatDuration(seconds?: number | null) {
 
 export function statusTone(status?: string) {
   if (status === "success" || status === "done" || status === "READY") return "good";
-  if (status === "failed" || status === "ERROR") return "bad";
-  if (status === "running" || status === "warning") return "warn";
+  if (status === "failed" || status === "ERROR" || status === "NOT_READY") return "bad";
+  if (status === "running" || status === "warning" || status === "READY_WITH_WARNINGS") return "warn";
   return "idle";
 }
