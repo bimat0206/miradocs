@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+tests/
 .venv/
 data/raw/
 data/parsed/
@@ -17,6 +18,7 @@ data/update.log
 data/update-status.json
 data/update-restart-requested
 .DS_Store
+docs/
 
 # Frontend build artifacts
 frontend/.next/
