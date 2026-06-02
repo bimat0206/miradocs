@@ -35,7 +35,7 @@ import {
   uploadDocument,
 } from "@/lib/api";
 import { useWorkspaceStore } from "@/lib/store";
-import type { CompareMode, JobEvent } from "@/lib/types";
+import type { CompareMode, JobEvent, PipelineStep } from "@/lib/types";
 import type { WorkflowTab } from "@/lib/workflow";
 
 import {
@@ -121,6 +121,9 @@ export function Workspace() {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [logsByDoc, setLogsByDoc] = useState<Record<string, JobEvent[]>>({});
+  // Live step-status overlay: updated by SSE progress events so step cards
+  // flip running → success mid-pipeline without waiting for the job to finish.
+  const [liveStepsByDoc, setLiveStepsByDoc] = useState<Record<string, Record<string, PipelineStep["status"]>>>({});
   const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHybrid, setSearchHybrid] = useState(true);
@@ -206,7 +209,11 @@ export function Workspace() {
     refetchInterval: activeTab === "Index" ? 5000 : false,
   });
 
-  const steps = activePipelineQuery.data?.steps ?? pipelineQuery.data?.steps ?? documentQuery.data?.pipeline_steps ?? [];
+  const rawSteps = activePipelineQuery.data?.steps ?? pipelineQuery.data?.steps ?? documentQuery.data?.pipeline_steps ?? [];
+  const liveOverlay = selectedDoc ? liveStepsByDoc[selectedDoc.doc_id] ?? {} : {};
+  const steps = rawSteps.map((s) =>
+    s.step_name in liveOverlay ? { ...s, status: liveOverlay[s.step_name] } : s
+  );
   const runs = runsQuery.data?.runs ?? [];
   const logs = selectedDoc ? logsByDoc[selectedDoc.doc_id] ?? [] : [];
   const progress = pipelineProgress(steps);
@@ -230,6 +237,20 @@ export function Workspace() {
       ...current,
       [docId]: mergeJobEvents(current[docId] ?? [], events),
     }));
+    // Update live step-status overlay from progress events so step cards
+    // reflect running/success immediately without waiting for a DB refetch.
+    const stepUpdates = events.reduce<Record<string, PipelineStep["status"]>>((acc, ev) => {
+      if (ev.type === "progress" && ev.step && ev.status) {
+        acc[ev.step] = ev.status as PipelineStep["status"];
+      }
+      return acc;
+    }, {});
+    if (Object.keys(stepUpdates).length > 0) {
+      setLiveStepsByDoc((current) => ({
+        ...current,
+        [docId]: { ...(current[docId] ?? {}), ...stepUpdates },
+      }));
+    }
   }, []);
 
   const closeEventSource = useCallback(() => {
@@ -305,6 +326,11 @@ export function Workspace() {
         deletedIds.forEach((docId) => delete next[docId]);
         return next;
       });
+      setLiveStepsByDoc((current) => {
+        const next = { ...current };
+        deletedIds.forEach((docId) => delete next[docId]);
+        return next;
+      });
       queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
   });
@@ -313,6 +339,7 @@ export function Workspace() {
     mutationFn: runPipeline,
     onSuccess: ({ job_id }, docId) => {
       setLogsByDoc((current) => ({ ...current, [docId]: [] }));
+      setLiveStepsByDoc((current) => ({ ...current, [docId]: {} }));
       connectToJob(job_id, docId);
       queryClient.invalidateQueries({ queryKey: ["pipeline-active", docId] });
     },

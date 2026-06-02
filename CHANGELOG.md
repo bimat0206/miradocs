@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.9 - 2026-06-02
+
+### Fixed
+- **Pipeline step cards frozen during DOCX/PPTX run**: SSE `progress` events carrying `step` + `status` were only used to update the percent bar. The `steps[]` array driving step card icons (pending → running → success) was only refreshed from the DB on job completion, so cards never transitioned mid-run. Added a `liveStepsByDoc` overlay in `workspace.tsx` that merges step statuses from incoming SSE events, making each step card flip immediately as the backend reports it.
+
+---
+
 ## v1.5.8 - 2026-06-02
 
 ### Fixed
