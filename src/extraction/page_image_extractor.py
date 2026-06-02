@@ -29,9 +29,14 @@ from src.intake.file_manager import get_page_images_dir
 logger = logging.getLogger(__name__)
 
 
-def extract_page_images(file_path: Path, doc_id: str) -> list[dict]:
+def extract_page_images(
+    file_path: Path,
+    doc_id: str,
+    render_source_path: Path | None = None,
+) -> list[dict]:
     """Render each page as PNG. Returns list of page image metadata in page order."""
-    if file_path.suffix.lower() != ".pdf":
+    source_path = render_source_path or file_path
+    if source_path.suffix.lower() != ".pdf":
         logger.info("Skipping page image rendering for non-PDF file: %s", file_path)
         return []
 
@@ -41,7 +46,7 @@ def extract_page_images(file_path: Path, doc_id: str) -> list[dict]:
     output_dir = get_page_images_dir(doc_id)
 
     # Probe page count once with a short-lived handle.
-    with _open_pdf(file_path) as doc:
+    with _open_pdf(source_path) as doc:
         page_count = len(doc)
 
     if page_count == 0:
@@ -49,11 +54,10 @@ def extract_page_images(file_path: Path, doc_id: str) -> list[dict]:
         return []
 
     workers = _resolve_worker_count(workers_cfg, page_count)
-    file_str = str(file_path)
 
     # Single-page or single-worker fast path: avoid the executor overhead.
     if workers <= 1 or page_count == 1:
-        with _open_pdf(file_path) as doc:
+        with _open_pdf(source_path) as doc:
             pages = [_render_page(doc, page_index, dpi, output_dir) for page_index in range(page_count)]
         logger.info("Generated %d page images for %s (sequential)", len(pages), doc_id)
         return pages
@@ -61,6 +65,7 @@ def extract_page_images(file_path: Path, doc_id: str) -> list[dict]:
     # Each worker keeps its own thread-local fitz.Document.
     import threading
     thread_local = threading.local()
+    file_str = str(source_path)
 
     def render_one(page_index: int) -> dict:
         doc = getattr(thread_local, "doc", None)

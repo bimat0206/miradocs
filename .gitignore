@@ -5,6 +5,7 @@ tests/
 .venv/
 data/raw/
 data/parsed/
+data/converted/
 data/page_images/
 data/tables/
 data/figures/

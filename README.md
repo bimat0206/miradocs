@@ -155,7 +155,7 @@ The ZIP contains:
 - `registry.db` — SQLite database with all document metadata and pipeline state
 - `data/raw/` — original uploaded files
 - `data/parsed/` — parsed artifacts (chunks, entities, relations, structure, quality reports)
-- `data/page_images/`, `data/tables/`, `data/figures/` — rendered pages and extracted assets
+- `data/converted/`, `data/page_images/`, `data/tables/`, `data/figures/` — derived Office PDFs, rendered pages, and extracted assets
 - `data/indexes/` — local Qdrant vector index (embeddings included, no re-indexing needed)
 - `miradocs_export.json` — manifest with version, timestamp, and doc list
 

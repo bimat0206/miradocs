@@ -276,7 +276,7 @@ for model in sorted(models):
 
 # ── 10. Data Directories ─────────────────────────────────────────────────────
 header("Data Directories")
-for d in ("raw", "parsed", "page_images", "tables", "figures", "reports", "indexes/qdrant"):
+for d in ("raw", "parsed", "converted", "page_images", "tables", "figures", "reports", "indexes/qdrant"):
     (ROOT / "data" / d).mkdir(parents=True, exist_ok=True)
 ok("All data directories ready")
 

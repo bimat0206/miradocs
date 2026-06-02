@@ -27,6 +27,7 @@ export type DocumentRecord = {
   document_type: string;
   domain: string;
   sensitivity: string;
+  page_count?: number;
   tags: string[];
   status: string;
   duplicate?: boolean;

@@ -21,6 +21,7 @@ MANIFEST_FILENAME = "miradocs_export.json"
 _ARTIFACT_DIRS = [
     "raw",
     "parsed",
+    "converted",
     "page_images",
     "tables",
     "figures",

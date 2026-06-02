@@ -89,7 +89,7 @@ def do_data():
     if confirm != "delete":
         info("Data deletion cancelled.")
         return
-    for d in ("raw", "parsed", "page_images", "tables", "figures", "indexes", "reports"):
+    for d in ("raw", "parsed", "converted", "page_images", "tables", "figures", "indexes", "reports"):
         dp = ROOT / "data" / d
         if dp.is_dir():
             for child in dp.iterdir():

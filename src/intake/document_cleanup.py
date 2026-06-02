@@ -12,6 +12,7 @@ def _artifact_paths(data_dir: Path, doc: dict) -> list[Path]:
     return [
         data_dir / "raw" / doc["project"] / doc_id,
         data_dir / "parsed" / doc_id,
+        data_dir / "converted" / doc_id,
         data_dir / "page_images" / doc_id,
         data_dir / "tables" / doc_id,
         data_dir / "figures" / doc_id,

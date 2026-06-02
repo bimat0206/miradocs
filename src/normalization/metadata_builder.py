@@ -22,6 +22,7 @@ def build_metadata(
     entities: list[dict],
 ) -> tuple[DocManifest, DocumentStructure]:
     """Build normalized metadata from all extraction outputs."""
+    page_count = _resolve_page_count(parse_result, page_images)
 
     # Build manifest
     manifest = DocManifest(
@@ -34,16 +35,16 @@ def build_metadata(
         document_type=doc_info.get("document_type", "Other"),
         domain=doc_info.get("domain", "General"),
         sensitivity=doc_info.get("sensitivity", "Internal"),
-        page_count=parse_result.get("page_count", 0),
+        page_count=page_count,
         parser=parse_result.get("parser", "unknown"),
     )
 
     # Build section hierarchy
-    sections = _build_sections(parse_result.get("sections", []), parse_result.get("page_count", 0))
+    sections = _build_sections(parse_result.get("sections", []), page_count)
 
     # Build page info
     pages = _build_pages(
-        page_count=parse_result.get("page_count", 0),
+        page_count=page_count,
         page_images=page_images,
         tables=tables,
         figures=figures,
@@ -64,6 +65,15 @@ def build_metadata(
 
     logger.info(f"Built metadata for {doc_id}: {len(sections)} sections, {len(pages)} pages")
     return manifest, structure
+
+
+def _resolve_page_count(parse_result: dict[str, Any], page_images: list[dict]) -> int:
+    page_count = int(parse_result.get("page_count") or 0)
+    if page_count > 0:
+        return page_count
+    if page_images:
+        return len(page_images)
+    return 0
 
 
 def _build_sections(raw_sections: list[dict], page_count: int) -> list[SectionInfo]:

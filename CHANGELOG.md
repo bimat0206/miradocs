@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.11 - 2026-06-02
+
+### Fixed
+- **DOCX/PPTX visual page support**: Office files are now converted to derived PDFs for page image rendering and page-scoped text extraction while preserving the original uploaded file.
+- **Non-PDF page counts collapse to `0`/`1`**: pipeline metadata now reconciles missing Docling page counts from rendered page images or the converted PDF page count.
+- **Broken inspector previews**: the Inspect view now falls back to manifest page counts and shows an unavailable preview state when a page image is missing.
+
+---
+
 ## v1.5.10 - 2026-06-02
 
 ### Fixed

@@ -21,6 +21,10 @@ type StructureArtifact = {
   sections?: Array<{ section_id: string; title: string; page_start: number; page_end: number; level: number }>;
 };
 
+type ManifestArtifact = {
+  page_count?: number;
+};
+
 type QualityArtifact = {
   status?: string;
   summary?: Record<string, number | string | unknown[]>;
@@ -42,6 +46,7 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
   const [selectedFigureId, setSelectedFigureId] = useState<string | null>(null);
   const [pageDraft, setPageDraft] = useState(String(page));
   const [largePageOpen, setLargePageOpen] = useState(false);
+  const [pageImageMissing, setPageImageMissing] = useState(false);
 
   const structureQuery = useQuery({
     queryKey: ["artifact", doc?.doc_id, "structure"],
@@ -52,6 +57,12 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
   const qualityQuery = useQuery({
     queryKey: ["artifact", doc?.doc_id, "quality"],
     queryFn: () => getArtifact<QualityArtifact>(doc!.doc_id, "quality"),
+    enabled: Boolean(doc),
+  });
+
+  const manifestQuery = useQuery({
+    queryKey: ["artifact", doc?.doc_id, "manifest"],
+    queryFn: () => getArtifact<ManifestArtifact>(doc!.doc_id, "manifest"),
     enabled: Boolean(doc),
   });
 
@@ -67,7 +78,11 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
     enabled: Boolean(doc),
   });
 
-  const totalPages = structureQuery.data?.pages?.length ?? 1;
+  const structurePageCount = structureQuery.data?.pages?.length ?? 0;
+  const totalPages = Math.max(
+    1,
+    structurePageCount || manifestQuery.data?.page_count || doc?.page_count || 1,
+  );
   const tables = tablesQuery.data ?? [];
   const figures = figuresQuery.data ?? [];
 
@@ -99,6 +114,16 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
   useEffect(() => {
     setPageDraft(String(page));
   }, [page]);
+
+  useEffect(() => {
+    setPageImageMissing(false);
+  }, [doc?.doc_id, page]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, setPage, totalPages]);
 
   if (!doc) return <EmptyState title="No document selected" />;
   const currentPageImage = pageImageUrl(doc.doc_id, page);
@@ -162,16 +187,26 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
         </div>
         <button
           type="button"
-          onClick={() => setLargePageOpen(true)}
+          onClick={() => {
+            if (!pageImageMissing) setLargePageOpen(true);
+          }}
           className="flex-1 min-h-0 flex items-center justify-center rounded-2xl border border-white/10 bg-black/30 p-2 overflow-hidden transition hover:border-cyan-300/40"
           aria-label={`View page ${page} larger`}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={currentPageImage}
-            alt={`Page ${page}`}
-            className="max-h-full max-w-full object-contain rounded-lg"
-          />
+          {pageImageMissing ? (
+            <div className="flex h-full min-h-[260px] w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/15 bg-white/[0.03] px-6 text-center">
+              <p className="text-sm font-medium text-slate-300">Page preview unavailable</p>
+              <p className="text-xs text-slate-500">Page {page} image has not been generated.</p>
+            </div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={currentPageImage}
+              alt={`Page ${page}`}
+              onError={() => setPageImageMissing(true)}
+              className="max-h-full max-w-full object-contain rounded-lg"
+            />
+          )}
         </button>
       </section>
 
@@ -298,7 +333,7 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
           )}
         </section>
       </section>
-      {largePageOpen && (
+      {largePageOpen && !pageImageMissing && (
         <ImageLightbox
           src={currentPageImage}
           alt={`Page ${page}`}

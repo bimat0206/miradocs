@@ -6,6 +6,7 @@ from typing import Callable, Any
 
 from src.config import get_data_dir
 from src.intake.document_registry import DocumentRegistry
+from src.intake.file_manager import get_parsed_dir
 
 
 PIPELINE_STEPS = [
@@ -69,11 +70,29 @@ def repair_completed_running_steps(
                 "SELECT step_name FROM pipeline_steps WHERE doc_id = ?", (doc_id,)
             ).fetchall()
         }
+        has_artifact = (root / "parsed" / doc_id / "relations.json").exists()
+        legacy_step_names = {
+            "parsed", "page_images", "tables_extracted", "figures_extracted",
+            "entities_extracted", "metadata_built", "quality_checked", "chunks_created",
+        }
+        step_statuses = {
+            step["step_name"]: step["status"]
+            for step in registry.get_pipeline_status(doc_id)
+        }
+        legacy_complete = (
+            legacy_step_names.issubset(step_statuses)
+            and all(step_statuses[name] == "success" for name in legacy_step_names)
+        )
         if "relations_extracted" not in existing_steps:
-            has_artifact = (root / "parsed" / doc_id / "relations.json").exists()
             conn.execute(
                 "INSERT OR IGNORE INTO pipeline_steps (doc_id, step_name, status) VALUES (?, ?, ?)",
-                (doc_id, "relations_extracted", "success" if has_artifact else "pending"),
+                (doc_id, "relations_extracted", "success" if has_artifact or legacy_complete else "pending"),
+            )
+        elif step_statuses.get("relations_extracted") == "pending" and (has_artifact or legacy_complete):
+            conn.execute(
+                "UPDATE pipeline_steps SET status = 'success', completed_at = CURRENT_TIMESTAMP "
+                "WHERE doc_id = ? AND step_name = ?",
+                (doc_id, "relations_extracted"),
             )
 
     return repaired
@@ -89,6 +108,7 @@ def run_pipeline(
 ) -> dict:
     """Run the document pipeline and emit progress events."""
     from src.parsing.parser_router import parse_document
+    from src.parsing.office_converter import convert_office_to_pdf
     from src.extraction.page_image_extractor import extract_page_images
     from src.extraction.table_extractor import extract_tables
     from src.extraction.figure_extractor import extract_figures
@@ -220,15 +240,21 @@ def run_pipeline(
             1,
             lambda: parse_document(raw_path, doc_id),
         )
+        converted_pdf = convert_office_to_pdf(raw_path, doc_id)
+        render_source = converted_pdf if converted_pdf else None
+        if converted_pdf:
+            parse_result["converted_pdf_path"] = str(converted_pdf)
         # Compute pages_text once here so all parallel lambdas can close over it
         pages_text = _get_pages_text(parse_result, raw_path)
         # Steps 2-5 are independent — run them concurrently
         page_images, tables, figures, entities = run_steps_parallel([
-            ("page_images",       "Page Images", 2, lambda: extract_page_images(raw_path, doc_id)),
+            ("page_images",       "Page Images", 2, lambda: extract_page_images(raw_path, doc_id, render_source_path=render_source)),
             ("tables_extracted",  "Tables",      3, lambda: extract_tables(parse_result, doc_id)),
             ("figures_extracted", "Figures",     4, lambda: extract_figures(raw_path, parse_result, doc_id)),
             ("entities_extracted","Entities",    5, lambda: extract_entities(pages_text, doc_id)),
         ])
+        _reconcile_parse_page_count(parse_result, page_images, pages_text, render_source)
+        _persist_parse_result(doc_id, parse_result)
         run_step(
             "relations_extracted",
             "Relations",
@@ -293,9 +319,11 @@ def _get_pages_text(parse_result: dict, raw_path: Path) -> list[dict]:
     if pages_text:
         return pages_text
 
-    if raw_path.suffix.lower() == ".pdf":
+    source_path = Path(parse_result["converted_pdf_path"]) if parse_result.get("converted_pdf_path") else raw_path
+
+    if source_path.suffix.lower() == ".pdf":
         import fitz
-        doc = fitz.open(str(raw_path))
+        doc = fitz.open(str(source_path))
         result = []
         for i in range(len(doc)):
             result.append({"page": i + 1, "text": doc[i].get_text("text")})
@@ -303,3 +331,41 @@ def _get_pages_text(parse_result: dict, raw_path: Path) -> list[dict]:
         return result
 
     return [{"page": 1, "text": parse_result.get("markdown", "")}]
+
+
+def _reconcile_parse_page_count(
+    parse_result: dict,
+    page_images: list[dict],
+    pages_text: list[dict],
+    render_source: Path | None,
+) -> None:
+    """Fill missing DOCX/PPTX page counts from page evidence."""
+    if int(parse_result.get("page_count") or 0) > 0:
+        return
+    if page_images:
+        parse_result["page_count"] = len(page_images)
+        return
+    if render_source and render_source.suffix.lower() == ".pdf":
+        import fitz
+        doc = fitz.open(str(render_source))
+        try:
+            parse_result["page_count"] = len(doc)
+            return
+        finally:
+            doc.close()
+    if pages_text:
+        parse_result["page_count"] = len(pages_text)
+        return
+    if parse_result.get("markdown", "").strip():
+        parse_result["page_count"] = 1
+
+
+def _persist_parse_result(doc_id: str, parse_result: dict) -> None:
+    """Persist parse metadata after pipeline-derived fields are reconciled."""
+    import json
+
+    parsed_dir = get_parsed_dir(doc_id)
+    export = {k: v for k, v in parse_result.items() if k != "markdown"}
+    (parsed_dir / "document.json").write_text(
+        json.dumps(export, default=str, indent=2), encoding="utf-8"
+    )
