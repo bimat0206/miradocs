@@ -197,7 +197,12 @@ def _get_or_create_converter_with_device():
     )
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.document_converter import (
+        DocumentConverter,
+        PdfFormatOption,
+        PowerpointFormatOption,
+        WordFormatOption,
+    )
 
     cfg = get_config().get("parsing", {})
     device_name = str(cfg.get("accelerator_device", "auto")).lower()
@@ -221,7 +226,9 @@ def _get_or_create_converter_with_device():
 
         converter = DocumentConverter(
             format_options={
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+                InputFormat.DOCX: WordFormatOption(),
+                InputFormat.PPTX: PowerpointFormatOption(),
             }
         )
 

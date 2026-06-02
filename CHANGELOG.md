@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.8 - 2026-06-02
+
+### Fixed
+- **DOCX and PPTX parsing produces empty output**: `DocumentConverter` was built with only `PdfFormatOption`, so Docling had no pipeline configured for Office formats. Added `WordFormatOption` (DOCX) and `PowerpointFormatOption` (PPTX) to the converter's `format_options`, enabling native Docling parsing with full structure extraction (headings, tables, figures) for both formats.
+
+---
+
 ## v1.5.7 - 2026-05-31
 
 ### Fixed
