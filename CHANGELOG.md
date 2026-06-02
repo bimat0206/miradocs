@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.10 - 2026-06-02
+
+### Fixed
+- **DOCX fallback parser missing tables and `source_format`**: `parse_with_docx` returned empty tables and no `source_format` key; added `_extract_tables` / `_grid_to_markdown` helpers and `source_format: .docx` to the result dict.
+- **Quality reporter penalises DOCX/PPTX for missing page images**: `_determine_status` treated a zero `image_ratio` as a hard failure even for formats that never produce page screenshots. Added `_page_images_required` guard (only `.pdf` requires images); DOCX/PPTX now score `image_ratio = 1` so they can reach `READY`.
+- **`source_format` not set by parser router**: `parse_document` now calls `result.setdefault("source_format", file_type)` after routing, ensuring all parsers expose the field even if their internal result omits it.
+
+---
+
 ## v1.5.9 - 2026-06-02
 
 ### Fixed

@@ -28,6 +28,7 @@ def generate_quality_report(
     # or the number of text pages, whichever is larger.
     if page_count == 0:
         page_count = max(len(page_images), len(pages_text))
+    page_images_required = _page_images_required(parse_result)
 
     # Compute metrics
     pages_with_text = sum(1 for p in pages_text if len(p.get("text", "").strip()) > low_text_threshold)
@@ -44,14 +45,16 @@ def generate_quality_report(
             warnings.append({"level": "warning", "page": pg, "message": "Low text content - may need OCR or manual review"})
     for pg in empty_pages:
         warnings.append({"level": "warning", "page": pg, "message": "Empty page - no text extracted"})
-    if images_generated < page_count:
+    if page_images_required and images_generated < page_count:
         warnings.append({"level": "warning", "page": None, "message": f"Missing page images: {page_count - images_generated} pages"})
     for t in tables:
         if t.get("status") == "no_grid":
             warnings.append({"level": "warning", "page": t.get("page"), "message": f"Table {t['table_id']} could not be parsed into grid"})
 
     # Determine status
-    status = _determine_status(page_count, pages_with_text, images_generated, warnings)
+    status = _determine_status(
+        page_count, pages_with_text, images_generated, warnings, page_images_required
+    )
 
     report = {
         "doc_id": doc_id,
@@ -62,6 +65,7 @@ def generate_quality_report(
             "low_text_pages": low_text_pages,
             "empty_pages": empty_pages,
             "page_images_generated": images_generated,
+            "page_images_required": page_images_required,
             "tables_detected": tables_detected,
             "figures_detected": figures_detected,
             "ocr_pages": low_text_pages,
@@ -79,12 +83,23 @@ def generate_quality_report(
     return report
 
 
-def _determine_status(page_count: int, pages_with_text: int, images_generated: int, warnings: list) -> str:
+def _page_images_required(parse_result: dict[str, Any]) -> bool:
+    """Only paged PDF-style inputs require page screenshots for readiness."""
+    return parse_result.get("source_format") == ".pdf"
+
+
+def _determine_status(
+    page_count: int,
+    pages_with_text: int,
+    images_generated: int,
+    warnings: list,
+    page_images_required: bool = True,
+) -> str:
     """Determine readiness status."""
     if page_count == 0:
         return "NOT_READY"
     text_ratio = pages_with_text / page_count if page_count else 0
-    image_ratio = images_generated / page_count if page_count else 0
+    image_ratio = images_generated / page_count if page_images_required and page_count else 1
 
     if text_ratio < 0.5:
         return "NOT_READY"

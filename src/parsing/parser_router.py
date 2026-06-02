@@ -23,6 +23,7 @@ def parse_document(file_path: Path, doc_id: str) -> dict[str, Any]:
         result = _parse_text(file_path)
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
+    result.setdefault("source_format", file_type)
 
     # Save outputs
     parsed_dir = get_parsed_dir(doc_id)
