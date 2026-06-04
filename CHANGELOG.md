@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.7.0 - 2026-06-04
+
+### Added
+- **Chunking and Search Quality improvements**:
+  - Deterministic chunk IDs using SHA-256 hashes (stable across reruns).
+  - Parent/child chunk relationships — child, table, and figure chunks now link to their parent section chunk via `parent_chunk_id`.
+  - Section-first chunking with semantic boundaries (headings, numbered/bullet lists, paragraphs) instead of page-first splitting.
+  - Table and figure context windows — 400 characters of surrounding text added to each artifact chunk.
+  - Parent context expansion during retrieval — search results now include full parent section text when available.
+  - Hybrid search with 3-list RRF fusion: Dense, BM25 (sparse over dense), and Keyword (global sparse index fallback).
+  - Frontend collapsible "Section context" panel in cross-document search view.
+
+---
+
 ## v1.6.0 - 2026-06-04
 
 ### Added

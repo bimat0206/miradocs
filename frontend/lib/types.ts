@@ -125,6 +125,9 @@ export type SearchResult = {
   } & Record<string, unknown>;
   source_file?: string;
   why_relevant?: string;
+  parent_chunk_id?: string;
+  parent_text?: string;
+  parent_section_path?: string;
   evidence?: {
     page_number: number;
     page_image: string | null;

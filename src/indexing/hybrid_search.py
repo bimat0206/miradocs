@@ -4,9 +4,9 @@ import re
 import logging
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 
-from src.config import get_config, get_data_dir
+from src.config import get_config
+from src.indexing.chunk_keyword_search import keyword_search_chunks
 from src.indexing.qdrant_adapter import QdrantAdapter
 
 logger = logging.getLogger(__name__)
@@ -20,8 +20,10 @@ class HybridSearchEngine:
         self.reranker: Reranker | None = None
         cfg = get_config()
         self._ollama_url = cfg["embedding"]["ollama_url"]
-        self._rerank_model = cfg["search"]["rerank_model"]
-        self._use_reranker = cfg.get("search", {}).get("rerank_enabled", False)
+        search_cfg = cfg.get("search", {})
+        self._rerank_model = search_cfg["rerank_model"]
+        self._use_reranker = search_cfg.get("rerank_enabled", False)
+        self._rrf_k = search_cfg.get("rrf_k", 60)
 
     def search(
         self,
@@ -43,11 +45,21 @@ class HybridSearchEngine:
         # Step 1: Dense retrieval
         dense_results = self.qdrant.search(query, top_k=top_k * 2, filters=filters)
 
-        # Step 2: BM25 sparse scoring on dense results
-        scored = self._bm25_rescore(query, dense_results)
+        # Step 2: Sparse candidates from chunks cache, plus BM25 over all candidates
+        keyword_results = self._keyword_search_candidates(query, top_k * 2, filters)
+        all_candidates = _dedupe_results(dense_results + keyword_results)
+        scored = self._bm25_rescore(query, all_candidates)
 
         # Step 3: RRF fusion
-        fused = self._rrf_fusion(dense_results, scored, dense_weight, sparse_weight)
+        fused = self._rrf_fusion(
+            dense_results,
+            scored,
+            keyword_results,
+            dense_weight,
+            sparse_weight,
+            keyword_weight=sparse_weight,
+            k=self._rrf_k,
+        )
 
         # Take top_k before reranking
         candidates = fused[:top_k * 2]
@@ -104,11 +116,13 @@ class HybridSearchEngine:
         self,
         dense_results: list[dict],
         sparse_results: list[dict],
+        keyword_results: list[dict],
         dense_weight: float,
         sparse_weight: float,
+        keyword_weight: float = 0.3,
         k: int = 60,
     ) -> list[dict]:
-        """Reciprocal Rank Fusion combining dense and sparse rankings."""
+        """Reciprocal Rank Fusion combining dense, BM25, and keyword rankings."""
         scores: dict[str, float] = {}
         result_map: dict[str, dict] = {}
 
@@ -120,7 +134,12 @@ class HybridSearchEngine:
         for rank, r in enumerate(sparse_results):
             cid = r["chunk_id"]
             scores[cid] = scores.get(cid, 0) + sparse_weight / (k + rank + 1)
-            result_map[cid] = r
+            result_map[cid] = {**result_map.get(cid, {}), **r}
+
+        for rank, r in enumerate(keyword_results):
+            cid = r["chunk_id"]
+            scores[cid] = scores.get(cid, 0) + keyword_weight / (k + rank + 1)
+            result_map[cid] = {**result_map.get(cid, {}), **r}
 
         ranked = sorted(scores.items(), key=lambda x: -x[1])
         return [{**result_map[cid], "hybrid_score": score} for cid, score in ranked]
@@ -135,6 +154,11 @@ class HybridSearchEngine:
         except Exception as e:
             logger.warning(f"Reranking failed, returning fusion order: {e}")
             return candidates[:top_k]
+
+    def _keyword_search_candidates(self, query: str, top_k: int, filters: dict | None) -> list[dict]:
+        """Keyword candidates from chunks cache — fills gaps dense might miss."""
+        doc_id = (filters or {}).get("doc_id")
+        return keyword_search_chunks(query, top_k, doc_ids=doc_id)
 
 
 # ─── Reranking ────────────────────────────────────────────────────────────────
@@ -187,3 +211,17 @@ def rerank_with_ollama(
 def _tokenize(text: str) -> list[str]:
     """Simple whitespace + lowercase tokenizer."""
     return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _dedupe_results(results: list[dict]) -> list[dict]:
+    """Remove duplicate chunks by chunk_id, preserving order."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for r in results:
+        cid = r.get("chunk_id")
+        if cid and cid not in seen:
+            seen.add(cid)
+            out.append(r)
+        elif not cid:
+            out.append(r)  # keep if missing id (should not happen)
+    return out

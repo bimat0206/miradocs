@@ -33,6 +33,9 @@ class SearchResultItem(BaseModel):
     entities: dict = Field(default_factory=dict)
     source_refs: dict = Field(default_factory=dict)
     why_relevant: str = ""
+    parent_chunk_id: str = ""
+    parent_text: str = ""
+    parent_section_path: str = ""
 
 
 class SearchDocsOutput(BaseModel):
