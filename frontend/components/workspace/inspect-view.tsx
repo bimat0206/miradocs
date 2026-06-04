@@ -21,10 +21,6 @@ type StructureArtifact = {
   sections?: Array<{ section_id: string; title: string; page_start: number; page_end: number; level: number }>;
 };
 
-type ManifestArtifact = {
-  page_count?: number;
-};
-
 type QualityArtifact = {
   status?: string;
   summary?: Record<string, number | string | unknown[]>;
@@ -60,12 +56,6 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
     enabled: Boolean(doc),
   });
 
-  const manifestQuery = useQuery({
-    queryKey: ["artifact", doc?.doc_id, "manifest"],
-    queryFn: () => getArtifact<ManifestArtifact>(doc!.doc_id, "manifest"),
-    enabled: Boolean(doc),
-  });
-
   const tablesQuery = useQuery({
     queryKey: ["artifact", doc?.doc_id, "tables"],
     queryFn: () => getArtifact<TableArtifact[]>(doc!.doc_id, "tables"),
@@ -81,7 +71,7 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
   const structurePageCount = structureQuery.data?.pages?.length ?? 0;
   const totalPages = Math.max(
     1,
-    structurePageCount || manifestQuery.data?.page_count || doc?.page_count || 1,
+    structurePageCount || doc?.page_count || 1,
   );
   const tables = tablesQuery.data ?? [];
   const figures = figuresQuery.data ?? [];
@@ -120,10 +110,11 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
   }, [doc?.doc_id, page]);
 
   useEffect(() => {
-    if (page > totalPages) {
+    const loading = structureQuery.isLoading || !doc?.page_count;
+    if (!loading && page > totalPages) {
       setPage(totalPages);
     }
-  }, [page, setPage, totalPages]);
+  }, [page, setPage, totalPages, structureQuery.isLoading, doc?.page_count]);
 
   if (!doc) return <EmptyState title="No document selected" />;
   const currentPageImage = pageImageUrl(doc.doc_id, page);

@@ -53,7 +53,8 @@ def repair_completed_running_steps(
         "indexed": lambda: (root / "parsed" / doc_id / "index_status.json").exists(),
     }
     repaired: list[dict] = []
-    for step in registry.get_pipeline_status(doc_id):
+    all_steps = registry.get_pipeline_status(doc_id)  # single DB read
+    for step in all_steps:
         if step["status"] != "running":
             continue
         has_artifact = artifact_checks.get(step["step_name"])
@@ -75,10 +76,8 @@ def repair_completed_running_steps(
             "parsed", "page_images", "tables_extracted", "figures_extracted",
             "entities_extracted", "metadata_built", "quality_checked", "chunks_created",
         }
-        step_statuses = {
-            step["step_name"]: step["status"]
-            for step in registry.get_pipeline_status(doc_id)
-        }
+        # Reuse the already-fetched step list — no second DB call.
+        step_statuses = {step["step_name"]: step["status"] for step in all_steps}
         legacy_complete = (
             legacy_step_names.issubset(step_statuses)
             and all(step_statuses[name] == "success" for name in legacy_step_names)
@@ -324,10 +323,12 @@ def _get_pages_text(parse_result: dict, raw_path: Path) -> list[dict]:
     if source_path.suffix.lower() == ".pdf":
         import fitz
         doc = fitz.open(str(source_path))
-        result = []
-        for i in range(len(doc)):
-            result.append({"page": i + 1, "text": doc[i].get_text("text")})
-        doc.close()
+        try:
+            result = []
+            for i in range(len(doc)):
+                result.append({"page": i + 1, "text": doc[i].get_text("text")})
+        finally:
+            doc.close()
         return result
 
     return [{"page": 1, "text": parse_result.get("markdown", "")}]
@@ -340,11 +341,14 @@ def _reconcile_parse_page_count(
     render_source: Path | None,
 ) -> None:
     """Fill missing DOCX/PPTX page counts from page evidence."""
-    if int(parse_result.get("page_count") or 0) > 0:
+    from src.normalization.metadata_builder import resolve_page_count
+
+    # Fast path: reuse canonical resolver (parse_result → page_images).
+    resolved = resolve_page_count(parse_result, page_images)
+    if resolved > 0:
+        parse_result["page_count"] = resolved
         return
-    if page_images:
-        parse_result["page_count"] = len(page_images)
-        return
+    # Fallback: open the converted PDF directly (only when page_images empty).
     if render_source and render_source.suffix.lower() == ".pdf":
         import fitz
         doc = fitz.open(str(render_source))

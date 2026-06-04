@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.12 - 2026-06-04
+
+### Fixed
+- **Inspect view page clamp fires before data loads**: the `useEffect` that clamps `page > totalPages` now guards on query loading state and `doc.page_count` presence, preventing the user's current page from being reset to 1 before queries resolve.
+- **Redundant manifest HTTP fetch in Inspect view**: dropped the `manifestQuery` network call — `page_count` is already present on the `DocumentRecord` prop; `totalPages` now reads `doc.page_count` directly as its fallback.
+- **LibreOffice output filename prediction brittle**: `convert_office_to_pdf` now globs `output_dir/*.pdf` instead of predicting `{stem}.pdf`, handling filenames with spaces, parentheses, and Unicode correctly.
+- **Zero-byte PDF silently accepted**: `convert_office_to_pdf` now checks `stat().st_size == 0` after confirming the file exists, logging and discarding empty outputs that LibreOffice writes on partial failure.
+- **LibreOffice stderr swallowed on failure**: `CalledProcessError` is now caught separately with `stdout`/`stderr` included in the warning log, making conversion failures diagnosable.
+- **fitz document not closed on exception in `_get_pages_text`**: wrapped `fitz.open()` in `try/finally` to guarantee `doc.close()` even when a corrupt page raises mid-loop.
+- **Dual page-count resolvers could disagree**: `_reconcile_parse_page_count` (pipeline) now delegates to `resolve_page_count` (metadata_builder) for the common cases, eliminating the duplicate logic; `resolve_page_count` is exported as the canonical resolver.
+- **Double SQLite read in `repair_completed_running_steps`**: `get_pipeline_status()` was called twice per repair invocation; result is now fetched once and reused for both the running-step loop and the migration guard.
+
+---
+
 ## v1.5.11 - 2026-06-02
 
 ### Fixed

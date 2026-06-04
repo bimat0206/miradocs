@@ -37,11 +37,10 @@ def convert_office_to_pdf(
     output_dir = root / doc_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    produced_pdf = output_dir / f"{file_path.stem}.pdf"
     normalized_pdf = output_dir / "source.pdf"
-    for path in (produced_pdf, normalized_pdf):
-        if path.exists():
-            path.unlink()
+    # Clear any previous outputs so glob finds only freshly produced files.
+    for stale in list(output_dir.glob("*.pdf")):
+        stale.unlink(missing_ok=True)
 
     cmd = [
         soffice,
@@ -54,13 +53,26 @@ def convert_office_to_pdf(
     ]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
+    except subprocess.CalledProcessError as exc:
+        logger.warning(
+            "Office PDF conversion failed for %s (exit %d):\nstdout: %s\nstderr: %s",
+            file_path, exc.returncode, exc.stdout, exc.stderr,
+        )
+        return None
     except Exception as exc:
         logger.warning("Office PDF conversion failed for %s: %s", file_path, exc)
         return None
 
-    if not produced_pdf.exists():
-        logger.warning("Office PDF conversion did not produce expected output: %s", produced_pdf)
+    # LibreOffice preserves the stem but may sanitize special chars on some
+    # platforms — glob for any produced PDF rather than predicting the name.
+    candidates = list(output_dir.glob("*.pdf"))
+    if not candidates:
+        logger.warning("Office PDF conversion produced no PDF in %s", output_dir)
         return None
-
+    produced_pdf = candidates[0]
+    if produced_pdf.stat().st_size == 0:
+        logger.warning("Office PDF conversion produced empty file: %s", produced_pdf)
+        produced_pdf.unlink(missing_ok=True)
+        return None
     produced_pdf.replace(normalized_pdf)
     return normalized_pdf

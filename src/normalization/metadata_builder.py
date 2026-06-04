@@ -67,13 +67,18 @@ def build_metadata(
     return manifest, structure
 
 
-def _resolve_page_count(parse_result: dict[str, Any], page_images: list[dict]) -> int:
+def resolve_page_count(parse_result: dict[str, Any], page_images: list[dict]) -> int:
+    """Canonical page count resolver: parse_result wins, then page_images, then 0."""
     page_count = int(parse_result.get("page_count") or 0)
     if page_count > 0:
         return page_count
     if page_images:
         return len(page_images)
     return 0
+
+
+# Kept for internal use by build_metadata.
+_resolve_page_count = resolve_page_count
 
 
 def _build_sections(raw_sections: list[dict], page_count: int) -> list[SectionInfo]:
