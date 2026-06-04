@@ -157,8 +157,8 @@ class RetrievalService:
 
         for chunks_file in chunk_files:
             try:
-                chunks = json.loads(chunks_file.read_text(encoding="utf-8"))
                 doc_id = chunks_file.parent.name
+                chunks = self._load_chunks_for_doc(doc_id)
                 for chunk in chunks:
                     if not self._matches_filters(chunk, doc_id, filters):
                         continue
@@ -196,14 +196,14 @@ class RetrievalService:
         """Enrich vector search results with doc metadata if available."""
         try:
             registry = _get_registry()
+            doc_ids = list({r.get("doc_id", "") for r in results if r.get("doc_id")})
+            docs = {d["doc_id"]: d for d in registry.get_documents_batch(doc_ids)}
             for r in results:
-                doc_id = r.get("doc_id", "")
-                if doc_id:
-                    doc = registry.get_document(doc_id)
-                    if doc:
-                        r["source_file"] = doc.get("filename", "")
-                        r["document_type"] = doc.get("document_type", "")
-                        r["domain"] = doc.get("domain", "")
+                doc = docs.get(r.get("doc_id", ""))
+                if doc:
+                    r["source_file"] = doc.get("filename", "")
+                    r["document_type"] = doc.get("document_type", "")
+                    r["domain"] = doc.get("domain", "")
         except Exception:
             pass
         return results

@@ -358,68 +358,68 @@ def _build_llm_relation_graph(
         VALID_PREDICATES = {"uses", "connects_to", "contains", "depends_on", "governs", "routes_to"}
         BATCH_SIZE = 5
 
-        for batch_start in range(0, len(pages_text), BATCH_SIZE):
-            batch = pages_text[batch_start: batch_start + BATCH_SIZE]
-            combined_text = "\n".join(
-                f"[Page {p['page']}] {p['text'][:500]}" for p in batch
-            )
-
-            prompt = (
-                "Extract architecture component relationships from the following text.\n"
-                "Return a JSON array of objects with keys: "
-                "source_type, source_value, target_type, target_value, relation.\n"
-                f"Valid relations: {', '.join(sorted(VALID_PREDICATES))}.\n"
-                "Only include relationships between named architecture entities "
-                "(AWS/Azure services, CIDRs, VPCs, accounts, environments).\n"
-                "Return ONLY the JSON array, no other text.\n\n"
-                f"Text:\n{combined_text}"
-            )
-
-            try:
-                resp = httpx.post(
-                    f"{ollama_url}/api/generate",
-                    json={"model": model, "prompt": prompt, "stream": False},
-                    timeout=60,
+        with httpx.Client(timeout=60.0) as client:
+            for batch_start in range(0, len(pages_text), BATCH_SIZE):
+                batch = pages_text[batch_start: batch_start + BATCH_SIZE]
+                combined_text = "\n".join(
+                    f"[Page {p['page']}] {p['text'][:500]}" for p in batch
                 )
-                resp.raise_for_status()
-                raw = resp.json().get("response", "")
-                # Extract JSON array from response
-                match = re.search(r"\[.*\]", raw, re.DOTALL)
-                if not match:
-                    continue
-                relations = json.loads(match.group(0))
-                if not isinstance(relations, list):
-                    continue
 
-                for rel in relations:
-                    src_type = str(rel.get("source_type", "")).strip()
-                    src_val = str(rel.get("source_value", "")).strip()
-                    tgt_type = str(rel.get("target_type", "")).strip()
-                    tgt_val = str(rel.get("target_value", "")).strip()
-                    predicate = str(rel.get("relation", "")).strip().lower()
+                prompt = (
+                    "Extract architecture component relationships from the following text.\n"
+                    "Return a JSON array of objects with keys: "
+                    "source_type, source_value, target_type, target_value, relation.\n"
+                    f"Valid relations: {', '.join(sorted(VALID_PREDICATES))}.\n"
+                    "Only include relationships between named architecture entities "
+                    "(AWS/Azure services, CIDRs, VPCs, accounts, environments).\n"
+                    "Return ONLY the JSON array, no other text.\n\n"
+                    f"Text:\n{combined_text}"
+                )
 
-                    if not all([src_type, src_val, tgt_type, tgt_val]):
+                try:
+                    resp = client.post(
+                        f"{ollama_url}/api/generate",
+                        json={"model": model, "prompt": prompt, "stream": False},
+                    )
+                    resp.raise_for_status()
+                    raw = resp.json().get("response", "")
+                    # Extract JSON array from response
+                    match = re.search(r"\[.*\]", raw, re.DOTALL)
+                    if not match:
                         continue
-                    if predicate not in VALID_PREDICATES:
-                        predicate = "uses"
-
-                    src_id = _make_node_id(src_type, src_val)
-                    tgt_id = _make_node_id(tgt_type, tgt_val)
-                    if src_id == tgt_id:
+                    relations = json.loads(match.group(0))
+                    if not isinstance(relations, list):
                         continue
 
-                    for nid, ntype, nval in [(src_id, src_type, src_val), (tgt_id, tgt_type, tgt_val)]:
-                        if nid not in G:
-                            G.add_node(nid, type=ntype, value=nval, page_first_seen=0, occurrence_count=1)
+                    for rel in relations:
+                        src_type = str(rel.get("source_type", "")).strip()
+                        src_val = str(rel.get("source_value", "")).strip()
+                        tgt_type = str(rel.get("target_type", "")).strip()
+                        tgt_val = str(rel.get("target_value", "")).strip()
+                        predicate = str(rel.get("relation", "")).strip().lower()
 
-                    if G.has_edge(src_id, tgt_id):
-                        G[src_id][tgt_id]["weight"] = G[src_id][tgt_id].get("weight", 1) + 1
-                    else:
-                        G.add_edge(src_id, tgt_id, weight=1, relation=predicate, pages=[])
+                        if not all([src_type, src_val, tgt_type, tgt_val]):
+                            continue
+                        if predicate not in VALID_PREDICATES:
+                            predicate = "uses"
 
-            except Exception as e:
-                logger.debug("LLM batch relation extraction failed: %s", e)
-                continue
+                        src_id = _make_node_id(src_type, src_val)
+                        tgt_id = _make_node_id(tgt_type, tgt_val)
+                        if src_id == tgt_id:
+                            continue
+
+                        for nid, ntype, nval in [(src_id, src_type, src_val), (tgt_id, tgt_type, tgt_val)]:
+                            if nid not in G:
+                                G.add_node(nid, type=ntype, value=nval, page_first_seen=0, occurrence_count=1)
+
+                        if G.has_edge(src_id, tgt_id):
+                            G[src_id][tgt_id]["weight"] = G[src_id][tgt_id].get("weight", 1) + 1
+                        else:
+                            G.add_edge(src_id, tgt_id, weight=1, relation=predicate, pages=[])
+
+                except Exception as e:
+                    logger.debug("LLM batch relation extraction failed: %s", e)
+                    continue
 
     except Exception as e:
         logger.warning("_build_llm_relation_graph failed: %s", e)

@@ -220,9 +220,12 @@ export function Workspace() {
   const displayProgress = livePipelineProgress(progress, logs);
   const processReady = processingComplete(steps);
   const pipelineCanRun = canRunPipeline(steps);
-  const latestProgressLog = [...logs]
-    .reverse()
-    .find((log) => log.type === "progress" || typeof log.elapsed_seconds === "number");
+  const latestProgressLog = useMemo(
+    () => [...logs]
+      .reverse()
+      .find((log) => log.type === "progress" || typeof log.elapsed_seconds === "number"),
+    [logs],
+  );
   const pipelineRuntime = {
     elapsed_seconds: latestProgressLog?.elapsed_seconds ?? null,
     eta_seconds: latestProgressLog?.eta_seconds ?? null,

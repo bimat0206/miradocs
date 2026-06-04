@@ -19,15 +19,18 @@ def parse_with_pymupdf(file_path: Path) -> dict[str, Any]:
 
     for page_num in range(len(doc)):
         page = doc[page_num]
-        text = page.get_text("text")
-        pages_text.append({"page": page_num + 1, "text": text})
-        all_text_parts.append(f"--- Page {page_num + 1} ---\n{text}")
 
-        # Extract headings via font size heuristics
+        # Extract blocks containing both layout text and metadata (e.g. font sizes)
         blocks = page.get_text("dict")["blocks"]
+
+        # Reconstruct text from spans to avoid a second parse pass
+        text_parts = []
         for block in blocks:
             if block.get("type") == 0:  # text block
                 for line in block.get("lines", []):
+                    line_text = "".join(span["text"] for span in line.get("spans", [])).strip()
+                    if line_text:
+                        text_parts.append(line_text)
                     for span in line.get("spans", []):
                         if span.get("size", 0) >= 14:
                             sections.append({
@@ -36,6 +39,9 @@ def parse_with_pymupdf(file_path: Path) -> dict[str, Any]:
                                 "page_start": page_num + 1,
                                 "level": _size_to_level(span["size"]),
                             })
+        text = "\n".join(text_parts)
+        pages_text.append({"page": page_num + 1, "text": text})
+        all_text_parts.append(f"--- Page {page_num + 1} ---\n{text}")
 
     doc.close()
     markdown = "\n\n".join(all_text_parts)

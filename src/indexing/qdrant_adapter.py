@@ -1,4 +1,5 @@
 """Qdrant indexing adapter with Ollama BGE-M3 embeddings."""
+import hashlib
 import logging
 import threading
 from typing import Any
@@ -45,7 +46,13 @@ class QdrantAdapter(IndexAdapter):
         qdrant_path = str(get_data_dir() / "indexes" / "qdrant")
         qdrant_url = cfg["indexing"].get("qdrant_url") or None
         self.client = _get_client(qdrant_path, qdrant_url)
+        # Shared HTTP client — reuses TCP connections across all embed calls.
+        self._http = httpx.Client(timeout=120.0)
         self._ensure_collection()
+
+    def close(self) -> None:
+        """Release the shared HTTP client. Call when the adapter is no longer needed."""
+        self._http.close()
 
     def _ensure_collection(self):
         collections = [c.name for c in self.client.get_collections().collections]
@@ -74,7 +81,7 @@ class QdrantAdapter(IndexAdapter):
         points = []
         for i, (chunk, vector) in enumerate(zip(chunks, embeddings)):
             points.append(PointStruct(
-                id=abs(hash(chunk["chunk_id"])) % (2**63),
+                id=int(hashlib.sha256(chunk["chunk_id"].encode()).hexdigest(), 16) % (2**63),
                 vector=vector,
                 payload={
                     "chunk_id": chunk["chunk_id"],
@@ -180,10 +187,9 @@ class QdrantAdapter(IndexAdapter):
         try:
             for i in range(0, len(texts), BATCH_SIZE):
                 batch = texts[i : i + BATCH_SIZE]
-                resp = httpx.post(
+                resp = self._http.post(
                     f"{self.ollama_url}/api/embed",
                     json={"model": self.embed_model, "input": batch},
-                    timeout=120.0,
                 )
                 if resp.status_code == 200:
                     results.extend(resp.json().get("embeddings", []))

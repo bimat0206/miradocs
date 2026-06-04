@@ -1,4 +1,5 @@
 """Chunk candidate builder - generates typed chunks for indexing."""
+import bisect
 import json
 import logging
 import uuid
@@ -38,6 +39,9 @@ def build_chunks(
             continue
         img_map[pg] = path
 
+    # Precompute section starts for binary search (sections sorted by page_start).
+    section_starts: list[int] = [s.get("page_start", 0) for s in sections]
+
     # 1. Section-level parent chunks
     for sec in sections:
         page_start = sec.get("page_start", 0)
@@ -63,7 +67,7 @@ def build_chunks(
             continue
         # Split long pages into sub-chunks with overlap
         for i, chunk_text in enumerate(_split_text(text, max_chars, overlap_chars)):
-            section_path = _find_section_for_page(sections, pg)
+            section_path = _find_section_for_page(sections, section_starts, pg)
             chunks.append(_make_chunk(
                 doc_id=doc_id,
                 chunk_type="child_text_chunk",
@@ -90,7 +94,7 @@ def build_chunks(
             text=text[:max_chars],
             page_start=pg,
             page_end=pg,
-            section_path=_find_section_for_page(sections, pg),
+            section_path=_find_section_for_page(sections, section_starts, pg),
             entities=_entities_for_pages(entities, pg, pg),
             source_refs={"page_image": img_map.get(pg), "table_id": table.get("table_id")},
         ))
@@ -106,7 +110,7 @@ def build_chunks(
             text=text,
             page_start=pg,
             page_end=pg,
-            section_path=_find_section_for_page(sections, pg),
+            section_path=_find_section_for_page(sections, section_starts, pg),
             entities=_entities_for_pages(entities, pg, pg),
             source_refs={
                 "page_image": img_map.get(pg),
@@ -193,9 +197,14 @@ def _entities_for_pages(entities: list[dict], start: int, end: int) -> dict:
     return result
 
 
-def _find_section_for_page(sections: list[dict], page: int) -> str:
-    """Find the section path for a given page."""
-    for sec in reversed(sections):
-        if sec.get("page_start", 0) <= page <= sec.get("page_end", sec.get("page_start", 0)):
-            return sec.get("section_path", sec.get("title", ""))
+def _find_section_for_page(sections: list[dict], section_starts: list[int], page: int) -> str:
+    """Find the section path for a given page using binary search."""
+    idx = bisect.bisect_right(section_starts, page) - 1
+    if idx < 0:
+        return ""
+    sec = sections[idx]
+    start = sec.get("page_start", 0)
+    end = sec.get("page_end", start)
+    if start <= page <= end:
+        return sec.get("section_path", sec.get("title", ""))
     return ""

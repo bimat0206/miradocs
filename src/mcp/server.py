@@ -402,38 +402,48 @@ def handle_tools_list(id, params: dict) -> dict:
     return _success_response(id, {"tools": TOOLS})
 
 
+
+# Build dispatch table once at import time so it is not reconstructed on
+# every tool call. Guarded by try/except so import errors surface clearly.
+try:
+    from src.mcp import schemas as _schemas, tools as _tools
+    _DISPATCH: dict | None = {
+        "search_docs": (_schemas.SearchDocsInput, _tools.search_docs),
+        "list_documents": (_schemas.ListDocsInput, _tools.list_documents),
+        "get_document_info": (_schemas.GetDocInfoInput, _tools.get_document_info),
+        "get_page_evidence": (_schemas.GetPageEvidenceInput, _tools.get_page_evidence),
+        "get_section_content": (_schemas.GetSectionInput, _tools.get_section_content),
+        "get_entities": (_schemas.GetEntitiesInput, _tools.get_entities),
+        "get_page_matches": (_schemas.GetPageMatchesInput, _tools.get_page_matches),
+        "get_pipeline_status": (_schemas.GetPipelineStatusInput, _tools.get_pipeline_status),
+        "get_index_status": (_schemas.GetIndexStatusInput, _tools.get_index_status),
+        "detect_compare_mode": (_schemas.DetectCompareModeInput, _tools.detect_compare_mode),
+        "list_compare_runs": (_schemas.ListCompareRunsInput, _tools.list_compare_runs),
+        "get_compare_run": (_schemas.GetCompareRunInput, _tools.get_compare_run),
+        "put_cross_search": (_schemas.PutCrossSearchInput, _tools.put_cross_search),
+        "put_compare": (_schemas.PutCompareInput, _tools.put_compare),
+        "get_entity_graph": (_schemas.GetEntityGraphInput, _tools.get_entity_graph),
+        "get_entity_relationships": (_schemas.GetEntityRelationshipsInput, _tools.get_entity_relationships),
+        "export_workspace": (_schemas.ExportWorkspaceInput, _tools.export_workspace),
+        "import_workspace": (_schemas.ImportWorkspaceInput, _tools.import_workspace),
+    }
+except Exception as _dispatch_err:  # pragma: no cover
+    logger.error("Failed to build MCP DISPATCH table: %s", _dispatch_err)
+    _DISPATCH = None
+
+
 def handle_tools_call(id, params: dict) -> dict:
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
 
     try:
-        from src.mcp import schemas, tools
+        if not _DISPATCH:
+            return _error_response(id, -32603, "MCP server configuration/initialization failed")
 
-        DISPATCH = {
-            "search_docs": (schemas.SearchDocsInput, tools.search_docs),
-            "list_documents": (schemas.ListDocsInput, tools.list_documents),
-            "get_document_info": (schemas.GetDocInfoInput, tools.get_document_info),
-            "get_page_evidence": (schemas.GetPageEvidenceInput, tools.get_page_evidence),
-            "get_section_content": (schemas.GetSectionInput, tools.get_section_content),
-            "get_entities": (schemas.GetEntitiesInput, tools.get_entities),
-            "get_page_matches": (schemas.GetPageMatchesInput, tools.get_page_matches),
-            "get_pipeline_status": (schemas.GetPipelineStatusInput, tools.get_pipeline_status),
-            "get_index_status": (schemas.GetIndexStatusInput, tools.get_index_status),
-            "detect_compare_mode": (schemas.DetectCompareModeInput, tools.detect_compare_mode),
-            "list_compare_runs": (schemas.ListCompareRunsInput, tools.list_compare_runs),
-            "get_compare_run": (schemas.GetCompareRunInput, tools.get_compare_run),
-            "put_cross_search": (schemas.PutCrossSearchInput, tools.put_cross_search),
-            "put_compare": (schemas.PutCompareInput, tools.put_compare),
-            "get_entity_graph": (schemas.GetEntityGraphInput, tools.get_entity_graph),
-            "get_entity_relationships": (schemas.GetEntityRelationshipsInput, tools.get_entity_relationships),
-            "export_workspace": (schemas.ExportWorkspaceInput, tools.export_workspace),
-            "import_workspace": (schemas.ImportWorkspaceInput, tools.import_workspace),
-        }
-
-        if tool_name not in DISPATCH:
+        if tool_name not in _DISPATCH:
             return _error_response(id, -32601, f"Unknown tool: {tool_name}")
 
-        input_cls, handler = DISPATCH[tool_name]
+        input_cls, handler = _DISPATCH[tool_name]
         input_data = input_cls(**arguments)
 
         # Validate search_docs query non-empty

@@ -1,4 +1,5 @@
 """Metadata builder - assembles extraction results into normalized structure."""
+import bisect
 import json
 import logging
 from pathlib import Path
@@ -154,13 +155,15 @@ def _build_pages(
         fig_map.setdefault(pg, []).append(f.get("figure_id", ""))
 
     pages = []
+    section_starts = [sec.page_start for sec in sections]
     for pg in range(1, page_count + 1):
-        # Find section for this page
+        # Find section for this page with binary search over sorted page starts.
         section_path = ""
-        for sec in reversed(sections):
+        idx = bisect.bisect_right(section_starts, pg) - 1
+        if idx >= 0:
+            sec = sections[idx]
             if sec.page_start <= pg <= sec.page_end:
                 section_path = sec.section_path
-                break
 
         pages.append(PageInfo(
             page_number=pg,

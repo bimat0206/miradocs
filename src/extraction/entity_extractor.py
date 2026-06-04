@@ -58,11 +58,19 @@ GOVERNANCE_TERMS = {
     "Network Account", "Security Account",
 }
 
-# Pre-compiled patterns — avoid re-compiling on every page
-_ENV_PATTERNS: list[tuple[str, re.Pattern]] = [
-    (env, re.compile(r'\b' + re.escape(env) + r'\b', re.IGNORECASE))
-    for env in ENVIRONMENT_LABELS
-]
+# Pre-compiled patterns — avoid re-compiling and substring-scanning on every page.
+# Using word-boundary patterns also prevents false positives ("S3" matching "S300").
+def _compile_dictionary_patterns(values: set[str]) -> list[tuple[str, re.Pattern]]:
+    return [
+        (v, re.compile(r'\b' + re.escape(v) + r'\b', re.IGNORECASE))
+        for v in values
+    ]
+
+
+_AWS_PATTERNS      = _compile_dictionary_patterns(AWS_SERVICES)
+_AZURE_PATTERNS    = _compile_dictionary_patterns(AZURE_SERVICES)
+_ENV_PATTERNS      = _compile_dictionary_patterns(ENVIRONMENT_LABELS)
+_GOVERNANCE_PATTERNS = _compile_dictionary_patterns(GOVERNANCE_TERMS)
 
 
 def extract_entities(pages_text: list[dict], doc_id: str) -> list[dict]:
@@ -86,14 +94,13 @@ def extract_entities(pages_text: list[dict], doc_id: str) -> list[dict]:
             entity_counts["arn"][arn] += 1
 
         # Dictionary-based extraction
-        text_upper = text.upper()
-        for svc in AWS_SERVICES:
-            if svc.upper() in text_upper:
+        for svc, pattern in _AWS_PATTERNS:
+            if pattern.search(text):
                 all_entities.append(_entity("aws_service", svc, page_num))
                 entity_counts["aws_service"][svc] += 1
 
-        for svc in AZURE_SERVICES:
-            if svc.upper() in text_upper:
+        for svc, pattern in _AZURE_PATTERNS:
+            if pattern.search(text):
                 all_entities.append(_entity("azure_service", svc, page_num))
                 entity_counts["azure_service"][svc] += 1
 
@@ -102,8 +109,8 @@ def extract_entities(pages_text: list[dict], doc_id: str) -> list[dict]:
                 all_entities.append(_entity("environment", env, page_num))
                 entity_counts["environment"][env] += 1
 
-        for term in GOVERNANCE_TERMS:
-            if term.upper() in text_upper:
+        for term, pattern in _GOVERNANCE_PATTERNS:
+            if pattern.search(text):
                 all_entities.append(_entity("governance", term, page_num))
                 entity_counts["governance"][term] += 1
 

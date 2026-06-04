@@ -413,7 +413,16 @@ def _page_value(item: dict, *keys: str) -> int | None:
 def _best_similarity(value: str, candidates: list[str]) -> float:
     if not candidates:
         return 0
-    return max(SequenceMatcher(None, value, candidate).ratio() for candidate in candidates)
+    val_words = set(value.lower().split())
+    best = 0.0
+    for cand in candidates:
+        cand_words = set(cand.lower().split())
+        if val_words and cand_words and val_words.isdisjoint(cand_words):
+            continue
+        ratio = SequenceMatcher(None, value, cand).ratio()
+        if ratio > best:
+            best = ratio
+    return best
 
 
 def _normalize_table(content: str) -> str:

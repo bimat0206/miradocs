@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.6.0 - 2026-06-04
+
+### Added
+- **Performance fixes plan v1.6.0 implemented**:
+  - `qdrant_adapter.py`: deterministic Qdrant point IDs using SHA-256 derived hashes (H1).
+  - `qdrant_adapter.py`: shared `httpx.Client` to reuse TCP/HTTP connections for Ollama embeddings (H2).
+  - `retrieval_service.py`: batch SQLite document lookups in `_enrich_results` (H3).
+  - `retrieval_service.py`: uses `_load_chunks_for_doc` cache helper in `_keyword_search` to avoid repetitive disk parses (H4).
+  - `mcp/server.py`: module-level `_DISPATCH` dict built once on import to avoid reconstruction per tool call (H5).
+  - `workspace.tsx`: memoized `latestProgressLog` via `useMemo` to avoid reverse/find on every render (H6).
+  - `entity_extractor.py`: pre-compiled entity dictionary patterns (AWS, Azure, env, governance) avoiding substring scans (H7).
+  - `metadata_builder.py`: binary search (bisect) section lookup for pages (M1).
+  - `chunk_candidate_builder.py`: binary search (bisect) section lookup for child chunks (M2).
+  - `config.py`: thread-safe lazy configuration loading with `threading.Lock` (M3).
+  - `pdf_fallback.py`: single-pass PyMuPDF dictionary parsing to extract text and headings together (M4).
+  - `compare_service.py`: token overlap fast-path check in `_best_similarity` to bypass expensive SequenceMatcher calls (M5).
+  - `relation_extractor.py`: shared `httpx.Client` connection block for Ollama generates (M6).
+
+---
+
 ## v1.5.15 - 2026-06-04
 
 ### Fixed

@@ -1,17 +1,21 @@
 """Application configuration loader."""
 from pathlib import Path
+import threading
 import yaml
 
 _CONFIG: dict | None = None
 _ROOT = Path(__file__).resolve().parent.parent
+_LOCK = threading.Lock()
 
 
 def get_config() -> dict:
     global _CONFIG
     if _CONFIG is None:
-        cfg_path = _ROOT / "config" / "settings.yaml"
-        with open(cfg_path) as f:
-            _CONFIG = yaml.safe_load(f)
+        with _LOCK:
+            if _CONFIG is None:
+                cfg_path = _ROOT / "config" / "settings.yaml"
+                with open(cfg_path) as f:
+                    _CONFIG = yaml.safe_load(f)
     return _CONFIG
 
 
