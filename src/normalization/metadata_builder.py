@@ -133,6 +133,9 @@ def _build_pages(
     # Index images by page
     img_map: dict[int, str] = {}
     for p in page_images:
+        if not isinstance(p, dict):
+            logger.warning("Skipping non-dict page_images entry: %r", p)
+            continue
         pg = p.get("page_number")
         path = p.get("image_path")
         if pg is None or path is None:
