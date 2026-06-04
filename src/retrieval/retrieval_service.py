@@ -1,11 +1,10 @@
 """Retrieval service — stable search interface hiding backend details."""
 import json
 import logging
-import re
-from pathlib import Path
 from typing import Any
 
 from src.config import get_config, get_data_dir
+from src.indexing.chunk_keyword_search import keyword_search_chunks
 from src.retrieval.evidence_pack import normalize_chunk_to_result
 from src.mcp.schemas import SearchDocsOutput, SearchResultItem
 
@@ -85,6 +84,9 @@ class RetrievalService:
                 if not results:
                     warnings.append("No results found in any search mode")
 
+        # Add parent section context before normalizing
+        results = self._expand_parent_context(results)
+
         # Normalize results
         items = [
             normalize_chunk_to_result(chunk, rank=i + 1, max_text_chars=self._max_text)
@@ -135,47 +137,32 @@ class RetrievalService:
 
     def _keyword_search(self, query: str, top_k: int, filters: dict | None) -> list[dict]:
         """Keyword search over chunks.json files as fallback."""
-        data_dir = get_data_dir()
-        parsed_dir = data_dir / "parsed"
-        if not parsed_dir.exists():
-            return []
-
-        query_terms = set(re.findall(r"[a-z0-9]+", query.lower()))
-        if not query_terms:
-            return []
-
-        # Narrow to specific doc(s) when a filter is set — avoids scanning the whole corpus
-        doc_id_filter = filters.get("doc_id") if filters else None
+        doc_id_filter = (filters or {}).get("doc_id")
+        chunk_types = (filters or {}).get("chunk_types")
+        results = keyword_search_chunks(query, top_k, doc_ids=doc_id_filter, chunk_types=chunk_types)
         if doc_id_filter:
-            doc_ids = [doc_id_filter] if isinstance(doc_id_filter, str) else list(doc_id_filter)
-            chunk_files = [parsed_dir / did / "chunks.json" for did in doc_ids]
-            chunk_files = [f for f in chunk_files if f.exists()]
-        else:
-            chunk_files = list(parsed_dir.rglob("chunks.json"))
+            ids = [doc_id_filter] if isinstance(doc_id_filter, str) else list(doc_id_filter)
+            results = [r for r in results if r.get("doc_id") in ids]
+        return results
 
-        all_scored: list[tuple[float, dict]] = []
-
-        for chunks_file in chunk_files:
-            try:
-                doc_id = chunks_file.parent.name
-                chunks = self._load_chunks_for_doc(doc_id)
-                for chunk in chunks:
-                    if not self._matches_filters(chunk, doc_id, filters):
-                        continue
-                    text_lower = chunk.get("text", "").lower()
-                    section_lower = chunk.get("section_path", "").lower()
-                    combined = text_lower + " " + section_lower
-                    # Score: fraction of query terms found
-                    matches = sum(1 for t in query_terms if t in combined)
-                    if matches > 0:
-                        score = matches / len(query_terms)
-                        chunk_copy = {**chunk, "score": score, "doc_id": doc_id}
-                        all_scored.append((score, chunk_copy))
-            except Exception as e:
-                logger.debug("Error reading %s: %s", chunks_file, e)
-
-        all_scored.sort(key=lambda x: x[0], reverse=True)
-        return [item[1] for item in all_scored[:top_k]]
+    def _expand_parent_context(self, results: list[dict]) -> list[dict]:
+        """For each result with a parent_chunk_id, resolve parent text and inject."""
+        expand = self._retrieval_cfg.get("expand_parent_context", True)
+        if not expand:
+            return results
+        max_chars = self._retrieval_cfg.get("parent_context_max_chars", 1800)
+        for result in results:
+            parent_id = result.get("parent_chunk_id")
+            doc_id = result.get("doc_id", "")
+            if not parent_id or not doc_id:
+                continue
+            doc_chunks = self._load_chunks_for_doc(doc_id)
+            parent = next((c for c in doc_chunks if c.get("chunk_id") == parent_id), None)
+            if parent:
+                result["parent_text"] = parent.get("text", "")[:max_chars]
+                result["parent_chunk_id"] = parent_id
+                result["parent_section_path"] = parent.get("section_path", "")
+        return results
 
     def _matches_filters(self, chunk: dict, doc_id: str, filters: dict | None) -> bool:
         """Check if chunk matches provided filters."""

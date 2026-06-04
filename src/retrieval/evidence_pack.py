@@ -23,6 +23,9 @@ def normalize_chunk_to_result(chunk: dict, rank: int, max_text_chars: int = 1800
         entities=chunk.get("entities", {}),
         source_refs=_sanitize_refs(chunk.get("source_refs", {})),
         why_relevant=chunk.get("why_relevant", ""),
+        parent_chunk_id=chunk.get("parent_chunk_id", "") or "",
+        parent_text=chunk.get("parent_text", "") or "",
+        parent_section_path=chunk.get("parent_section_path", "") or "",
     )
 
 

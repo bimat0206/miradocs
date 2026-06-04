@@ -310,6 +310,20 @@ function DocumentSearchLane({
                 <div className="mb-4 max-h-[180px] overflow-auto rounded-xl border border-white/10 bg-slate-950/45 p-3 text-sm leading-6 text-slate-200 whitespace-pre-wrap [overflow-wrap:anywhere]">
                   <HighlightedText text={selected.text} query={query} />
                 </div>
+                {selected.parent_text && (
+                  <>
+                    <p className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">Section context</p>
+                    <details className="group mb-4">
+                      <summary className="cursor-pointer rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-400 transition hover:text-slate-200">
+                        Expand section context
+                        {selected.parent_section_path && <span className="ml-2 text-xs text-slate-500">{selected.parent_section_path}</span>}
+                      </summary>
+                      <div className="mt-2 max-h-[260px] overflow-auto rounded-xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3 text-sm leading-6 text-slate-200 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                        <HighlightedText text={selected.parent_text} query={query} />
+                      </div>
+                    </details>
+                  </>
+                )}
                 {selected.evidence?.nearby_text && (
                   <>
                     <p className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">Nearby page text</p>

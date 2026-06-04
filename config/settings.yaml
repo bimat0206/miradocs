@@ -38,6 +38,9 @@ indexing:
 chunking:
   max_chunk_tokens: 512
   overlap_tokens: 50
+  stable_chunk_ids: true
+  section_first_chunking: true
+  artifact_context_chars: 400
 
 quality:
   low_text_threshold: 50
@@ -54,6 +57,8 @@ search:
   rerank_model: "qwen3.5:4b"
   default_top_k: 10
   rerank_top_k: 5
+  fusion_method: "rrf"
+  rrf_k: 60
 
 mcp:
   server_name: "miradocs"
@@ -65,6 +70,8 @@ retrieval:
   default_top_k: 8
   fallback_to_keyword: true
   max_result_text_chars: 1800
+  expand_parent_context: true
+  parent_context_max_chars: 1800
 
 graph:
   use_llm_relations: true         # true = LLM-extracted predicates; false = co-occurrence only
