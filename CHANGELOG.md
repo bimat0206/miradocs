@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.13 - 2026-06-04
+
+### Changed
+- **Unified PDF pipeline for DOCX/PPTX**: office files are now converted to PDF via LibreOffice *before* the parse step, so page images, figure cropping, and text extraction all run through the single PDF path. Falls back to native Docling parsing if LibreOffice is unavailable. Removes `render_source` branching from `run_pipeline` and simplifies `_get_pages_text` and `_reconcile_parse_page_count`.
+
+---
+
 ## v1.5.12 - 2026-06-04
 
 ### Fixed

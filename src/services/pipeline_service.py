@@ -122,6 +122,12 @@ def run_pipeline(
     if not raw_path.exists():
         raise FileNotFoundError(f"Raw file not found: {raw_path}")
 
+    # For office formats, convert to PDF upfront so the entire pipeline
+    # (parse, page images, figures, text extraction) runs through the unified
+    # PDF path. Falls back to raw_path if LibreOffice is unavailable.
+    converted_pdf = convert_office_to_pdf(raw_path, doc_id)
+    parse_path = converted_pdf if converted_pdf else raw_path
+
     started = time.monotonic()
     total = len(PIPELINE_STEPS)
 
@@ -237,22 +243,20 @@ def run_pipeline(
             "parsed",
             "Parse Document",
             1,
-            lambda: parse_document(raw_path, doc_id),
+            lambda: parse_document(parse_path, doc_id),
         )
-        converted_pdf = convert_office_to_pdf(raw_path, doc_id)
-        render_source = converted_pdf if converted_pdf else None
         if converted_pdf:
             parse_result["converted_pdf_path"] = str(converted_pdf)
         # Compute pages_text once here so all parallel lambdas can close over it
-        pages_text = _get_pages_text(parse_result, raw_path)
+        pages_text = _get_pages_text(parse_result, parse_path)
         # Steps 2-5 are independent — run them concurrently
         page_images, tables, figures, entities = run_steps_parallel([
-            ("page_images",       "Page Images", 2, lambda: extract_page_images(raw_path, doc_id, render_source_path=render_source)),
+            ("page_images",       "Page Images", 2, lambda: extract_page_images(parse_path, doc_id)),
             ("tables_extracted",  "Tables",      3, lambda: extract_tables(parse_result, doc_id)),
-            ("figures_extracted", "Figures",     4, lambda: extract_figures(raw_path, parse_result, doc_id)),
+            ("figures_extracted", "Figures",     4, lambda: extract_figures(parse_path, parse_result, doc_id)),
             ("entities_extracted","Entities",    5, lambda: extract_entities(pages_text, doc_id)),
         ])
-        _reconcile_parse_page_count(parse_result, page_images, pages_text, render_source)
+        _reconcile_parse_page_count(parse_result, page_images, pages_text, None)
         _persist_parse_result(doc_id, parse_result)
         run_step(
             "relations_extracted",
@@ -312,17 +316,15 @@ def run_pipeline(
         raise
 
 
-def _get_pages_text(parse_result: dict, raw_path: Path) -> list[dict]:
+def _get_pages_text(parse_result: dict, parse_path: Path) -> list[dict]:
     doc_dict = parse_result.get("doc_dict", {})
     pages_text = doc_dict.get("pages_text")
     if pages_text:
         return pages_text
 
-    source_path = Path(parse_result["converted_pdf_path"]) if parse_result.get("converted_pdf_path") else raw_path
-
-    if source_path.suffix.lower() == ".pdf":
+    if parse_path.suffix.lower() == ".pdf":
         import fitz
-        doc = fitz.open(str(source_path))
+        doc = fitz.open(str(parse_path))
         try:
             result = []
             for i in range(len(doc)):
@@ -338,25 +340,15 @@ def _reconcile_parse_page_count(
     parse_result: dict,
     page_images: list[dict],
     pages_text: list[dict],
-    render_source: Path | None,
+    render_source: Path | None = None,
 ) -> None:
-    """Fill missing DOCX/PPTX page counts from page evidence."""
+    """Fill missing page counts from pipeline evidence."""
     from src.normalization.metadata_builder import resolve_page_count
 
-    # Fast path: reuse canonical resolver (parse_result → page_images).
     resolved = resolve_page_count(parse_result, page_images)
     if resolved > 0:
         parse_result["page_count"] = resolved
         return
-    # Fallback: open the converted PDF directly (only when page_images empty).
-    if render_source and render_source.suffix.lower() == ".pdf":
-        import fitz
-        doc = fitz.open(str(render_source))
-        try:
-            parse_result["page_count"] = len(doc)
-            return
-        finally:
-            doc.close()
     if pages_text:
         parse_result["page_count"] = len(pages_text)
         return
