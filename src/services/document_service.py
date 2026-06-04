@@ -1,8 +1,11 @@
 """Document and artifact operations for the API layer."""
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from src.intake.document_cleanup import remove_document
 from src.intake.document_registry import DocumentRegistry
@@ -127,7 +130,6 @@ def raw_document_path(doc: dict, data_dir: Path) -> Path:
 
 def page_image_matches(doc: dict, page_num: int, query: str, data_dir: Path) -> dict:
     terms = _query_terms(query)
-    raw_path = raw_document_path(doc, data_dir)
     response = {
         "doc_id": doc["doc_id"],
         "page": page_num,
@@ -136,14 +138,18 @@ def page_image_matches(doc: dict, page_num: int, query: str, data_dir: Path) -> 
         "page_height": 0,
         "matches": [],
     }
-    if not terms or doc.get("file_type") != "pdf" or not raw_path.exists() or page_num < 1:
+    if not terms or page_num < 1:
+        return response
+
+    pdf_path = _resolve_pdf_path(doc, data_dir)
+    if pdf_path is None:
         return response
 
     import fitz
 
     pdf = None
     try:
-        pdf = fitz.open(str(raw_path))
+        pdf = fitz.open(str(pdf_path))
         if page_num > len(pdf):
             return response
         page = pdf[page_num - 1]
@@ -164,12 +170,27 @@ def page_image_matches(doc: dict, page_num: int, query: str, data_dir: Path) -> 
                     "height": (y1 - y0) / rect.height,
                 })
         response["matches"] = matches
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to extract page matches for %s page %d: %s", doc["doc_id"], page_num, exc)
         return response
     finally:
         if pdf is not None:
             pdf.close()
     return response
+
+
+def _resolve_pdf_path(doc: dict, data_dir: Path) -> Path | None:
+    """Return the PDF file to use for word-bbox extraction.
+
+    PDFs → the original uploaded file.
+    DOCX/PPTX → the converted source.pdf produced by office_converter.
+    Returns None if no usable PDF exists (LibreOffice unavailable or pre-v1.5.13 doc).
+    """
+    if doc.get("file_type") == "pdf":
+        path = raw_document_path(doc, data_dir)
+        return path if path.exists() else None
+    converted = data_dir / "converted" / doc["doc_id"] / "source.pdf"
+    return converted if converted.exists() else None
 
 
 def _query_terms(query: str) -> set[str]:

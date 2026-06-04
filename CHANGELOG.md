@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.14 - 2026-06-04
+
+### Fixed
+- **Keyword highlight overlays missing for DOCX/PPTX in cross-document search**: `page_image_matches` was hard-gated on `file_type == "pdf"`, returning empty matches for all office docs. Added `_resolve_pdf_path` helper that returns the original PDF for native PDFs, or the LibreOffice-converted `source.pdf` for DOCX/PPTX. Pre-v1.5.13 docs without a converted PDF gracefully return empty matches (no overlay, no error). Warning logged when fitz extraction fails.
+
+---
+
 ## v1.5.13 - 2026-06-04
 
 ### Changed
