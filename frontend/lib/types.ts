@@ -100,7 +100,7 @@ export type IndexStatus = {
   chunks_count: number;
   indexed: boolean;
   last_indexed_at?: string | null;
-  last_index_result?: { status?: string; indexed?: number; [key: string]: unknown } | null;
+  last_index_result?: ({ status?: string; indexed?: number; chunks_count?: number } & Record<string, unknown>) | null;
   index_step?: PipelineStep | null;
   adapter: Record<string, unknown>;
   reindex_recommended: boolean;
@@ -117,7 +117,12 @@ export type SearchResult = {
   page_start: number;
   section_path: string;
   text: string;
-  source_refs: Record<string, unknown>;
+  source_refs: {
+    page_image?: string | null;
+    table_id?: string | null;
+    figure_id?: string | null;
+    figure_image?: string | null;
+  } & Record<string, unknown>;
   source_file?: string;
   why_relevant?: string;
   evidence?: {

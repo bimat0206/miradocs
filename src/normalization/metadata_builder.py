@@ -131,7 +131,14 @@ def _build_pages(
 ) -> list[PageInfo]:
     """Build page info with linked artifacts."""
     # Index images by page
-    img_map = {p["page_number"]: p["image_path"] for p in page_images}
+    img_map: dict[int, str] = {}
+    for p in page_images:
+        pg = p.get("page_number")
+        path = p.get("image_path")
+        if pg is None or path is None:
+            logger.warning("Skipping malformed page_images entry: %s", p)
+            continue
+        img_map[pg] = path
     # Index tables by page
     table_map: dict[int, list[str]] = {}
     for t in tables:

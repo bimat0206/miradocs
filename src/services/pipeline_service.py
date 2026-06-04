@@ -127,6 +127,7 @@ def run_pipeline(
     # PDF path. Falls back to raw_path if LibreOffice is unavailable.
     converted_pdf = convert_office_to_pdf(raw_path, doc_id)
     parse_path = converted_pdf if converted_pdf else raw_path
+    original_format = raw_path.suffix.lower()
 
     started = time.monotonic()
     total = len(PIPELINE_STEPS)
@@ -245,6 +246,7 @@ def run_pipeline(
             1,
             lambda: parse_document(parse_path, doc_id),
         )
+        parse_result["original_format"] = original_format
         if converted_pdf:
             parse_result["converted_pdf_path"] = str(converted_pdf)
         # Compute pages_text once here so all parallel lambdas can close over it
@@ -308,6 +310,9 @@ def run_pipeline(
         )
 
         registry.update_document_status(doc_id, report["status"])
+        final_page_count = int(parse_result.get("page_count") or 0)
+        if final_page_count > 0:
+            registry.update_document_page_count(doc_id, final_page_count)
         return {"status": report["status"], "chunks": len(chunks), "indexed": index_result.get("indexed", 0)}
     except Exception as e:
         for step in registry.get_pipeline_status(doc_id):

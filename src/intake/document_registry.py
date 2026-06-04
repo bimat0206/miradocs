@@ -1,11 +1,14 @@
 """SQLite-backed document registry and pipeline state tracker."""
 import json
+import logging
 import sqlite3
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from src.config import get_db_path
 
@@ -22,7 +25,8 @@ CREATE TABLE IF NOT EXISTS documents (
     domain TEXT DEFAULT 'General',
     sensitivity TEXT DEFAULT 'Internal',
     tags_json TEXT DEFAULT '[]',
-    status TEXT DEFAULT 'uploaded'
+    status TEXT DEFAULT 'uploaded',
+    page_count INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pipeline_steps (
@@ -129,13 +133,16 @@ class DocumentRegistry:
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
             if "tags_json" not in columns:
                 conn.execute("ALTER TABLE documents ADD COLUMN tags_json TEXT DEFAULT '[]'")
+            if "page_count" not in columns:
+                conn.execute("ALTER TABLE documents ADD COLUMN page_count INTEGER DEFAULT NULL")
 
     def _row_to_document(self, row: sqlite3.Row) -> dict:
         doc = dict(row)
         raw_tags = doc.pop("tags_json", None)
         try:
             tags = json.loads(raw_tags or "[]")
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            logger.warning("Failed to parse tags_json for doc %s: %s", doc.get("doc_id"), exc)
             tags = []
         doc["tags"] = [str(tag) for tag in tags if str(tag).strip()]
         return doc
@@ -391,6 +398,13 @@ class DocumentRegistry:
             conn.execute(
                 "UPDATE documents SET status = ? WHERE doc_id = ?",
                 (status, doc_id)
+            )
+
+    def update_document_page_count(self, doc_id: str, page_count: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE documents SET page_count = ? WHERE doc_id = ?",
+                (page_count, doc_id),
             )
 
     def update_document_tags(self, doc_id: str, tags: list[str]) -> Optional[dict]:

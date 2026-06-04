@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.5.15 - 2026-06-04
+
+### Fixed
+- **page_count never stored in registry**: added `page_count` column to `documents` table with `ALTER TABLE` migration; pipeline now writes the final value after `build_metadata`; frontend `doc.page_count` fallback is now populated.
+- **KeyError crash on malformed page_images entries**: `metadata_builder._build_pages` and `chunk_candidate_builder` now use `.get()` with a warning log when `page_number` or `image_path` is missing.
+- **Silent tags_json parse failure in registry**: `JSONDecodeError` now logs a warning with `doc_id` before falling back to `[]`.
+- **`doc["status"]` KeyError on pipeline-complete path**: both accesses in `main.py` replaced with `doc.get("status", "unknown")`.
+- **Swallowed torch exceptions in accelerator detection**: CUDA and MPS probe `pass` blocks now log `logger.debug(..., exc_info=True)` so broken driver/torch installs are diagnosable.
+- **original_format lost after DOCX/PPTX → PDF conversion**: `pipeline_service` now sets `parse_result["original_format"]` before the parse step and persists it via `_persist_parse_result`.
+- **Overly loose TypeScript types**: `source_refs` and `last_index_result` now enumerate known keys intersected with `Record<string, unknown>` for adapter-specific escape hatch.
+
+---
+
 ## v1.5.14 - 2026-06-04
 
 ### Fixed

@@ -320,7 +320,7 @@ def _auto_detect_device(AcceleratorDevice):
             ):
                 return AcceleratorDevice.CUDA
         except Exception:
-            pass
+            logger.debug("CUDA probe failed; skipping CUDA accelerator.", exc_info=True)
 
         # Apple Silicon GPU.
         try:
@@ -333,7 +333,7 @@ def _auto_detect_device(AcceleratorDevice):
             ):
                 return AcceleratorDevice.MPS
         except Exception:
-            pass
+            logger.debug("MPS probe failed; skipping MPS accelerator.", exc_info=True)
     except ImportError:
         # PyTorch isn't installed — Docling's CPU pipeline still works.
         logger.debug("torch not importable; using CPU for Docling.")

@@ -256,10 +256,10 @@ def create_app(
             event = app.state.jobs.emit(
                 job.job_id,
                 "done",
-                {"message": "Pipeline already complete", "result": {"status": doc["status"]}},
+                {"message": "Pipeline already complete", "result": {"status": doc.get("status", "unknown")}},
             )
             app.state.registry.add_pipeline_run_event(run_id, event)
-            app.state.registry.update_pipeline_run(run_id, "done", result={"status": doc["status"]})
+            app.state.registry.update_pipeline_run(run_id, "done", result={"status": doc.get("status", "unknown")})
             return {"job_id": job.job_id, "status": "done"}
 
         if steps_1_8_complete and not indexing_complete:

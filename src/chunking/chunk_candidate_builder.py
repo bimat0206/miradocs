@@ -26,7 +26,14 @@ def build_chunks(
     overlap_chars = cfg["chunking"].get("overlap_tokens", 0) * 4
 
     chunks = []
-    img_map = {p["page_number"]: p["image_path"] for p in page_images}
+    img_map: dict[int, str] = {}
+    for p in page_images:
+        pg = p.get("page_number")
+        path = p.get("image_path")
+        if pg is None or path is None:
+            logger.warning("Skipping malformed page_images entry in chunk builder: %s", p)
+            continue
+        img_map[pg] = path
 
     # 1. Section-level parent chunks
     for sec in sections:
