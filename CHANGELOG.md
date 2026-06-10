@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Unsafe update fallback target**: failed `git pull --ff-only` recovery now resets to the current branch's configured upstream instead of hardcoded `origin/main`.
 - **Stash failure handling**: updater now aborts with a failed status if local tracked changes cannot be stashed, instead of continuing into pull/reset.
 - **Stale update status**: `/api/update-status` now marks old `updating` records as failed so the UI does not stay stuck after an abandoned update.
+- **Office page text extraction**: `_get_pages_text` now reads the converted PDF for DOCX/PPTX inputs when available, matching visual page evidence.
 
 ---
 

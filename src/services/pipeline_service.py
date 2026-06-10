@@ -327,9 +327,16 @@ def _get_pages_text(parse_result: dict, parse_path: Path) -> list[dict]:
     if pages_text:
         return pages_text
 
-    if parse_path.suffix.lower() == ".pdf":
+    # If there is a converted PDF path (e.g. from office conversion), prefer it
+    pdf_path = parse_result.get("converted_pdf_path")
+    if pdf_path:
+        pdf_path_obj = Path(pdf_path)
+    else:
+        pdf_path_obj = parse_path
+
+    if pdf_path_obj.suffix.lower() == ".pdf":
         import fitz
-        doc = fitz.open(str(parse_path))
+        doc = fitz.open(str(pdf_path_obj))
         try:
             result = []
             for i in range(len(doc)):
