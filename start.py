@@ -141,6 +141,30 @@ class Launcher:
         except Exception:
             return None
 
+    def version_key(self, version: str) -> tuple[int, ...] | None:
+        cleaned = version.strip().lower().removeprefix("v")
+        cleaned = cleaned.split("-", 1)[0].split("+", 1)[0]
+        parts: list[int] = []
+        for token in cleaned.split("."):
+            digits = ""
+            for char in token:
+                if not char.isdigit():
+                    break
+                digits += char
+            if digits == "":
+                return None
+            parts.append(int(digits))
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts)
+
+    def remote_version_is_newer(self, local_version: str, remote_version: str) -> bool:
+        local_key = self.version_key(local_version)
+        remote_key = self.version_key(remote_version)
+        if local_key is None or remote_key is None:
+            return False
+        return remote_key > local_key
+
     def check_startup_update(self) -> bool:
         if self.env.get("MIRADOCS_SKIP_START_UPDATE") == "1":
             return False
@@ -156,7 +180,7 @@ class Launcher:
 
         self.info("Checking for updates …")
         remote_version = self.remote_main_version(repo)
-        if not remote_version or remote_version == local_version:
+        if not remote_version or not self.remote_version_is_newer(local_version, remote_version):
             return False
 
         self.header("Update Available")
@@ -483,6 +507,10 @@ class Launcher:
             self.log("Pulling latest changes...")
             self.write_status("updating", "Pulling latest changes...", prev_version)
             stashed = self.stash_tracked_changes_if_needed()
+            if stashed is None:
+                self.write_status("failed", "Unable to stash local changes before update.", prev_version)
+                self.log("FATAL: Could not stash local changes before update.")
+                return 1
             if not self.git_pull_latest(prev_version):
                 return 1
             if stashed:
@@ -511,19 +539,28 @@ class Launcher:
             self.log(warn_on_failure)
         return result.returncode == 0
 
-    def stash_tracked_changes_if_needed(self) -> bool:
+    def stash_tracked_changes_if_needed(self) -> bool | None:
         diff = self.run(["git", "diff", "--quiet"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if diff.returncode == 0:
             return False
         self.log("Stashing local changes...")
-        return self.run_to_log(["git", "stash"], warn_on_failure="WARNING: git stash failed — continuing anyway")
+        if self.run_to_log(["git", "stash"], warn_on_failure="WARNING: git stash failed"):
+            return True
+        return None
 
     def git_pull_latest(self, prev_version: str) -> bool:
         if self.run_to_log(["git", "pull", "--ff-only"]):
             return True
         self.log("ERROR: git pull failed. Attempting reset...")
-        self.run_to_log(["git", "fetch", "origin"])
-        if self.run_to_log(["git", "reset", "--hard", "origin/main"]):
+        upstream = self.run_text(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], timeout=5)
+        upstream_ref = upstream.stdout.strip() if upstream.returncode == 0 else ""
+        if not upstream_ref:
+            self.write_status("failed", "Git pull failed and no upstream branch is configured.", prev_version)
+            self.log("FATAL: Could not determine upstream branch for reset.")
+            return False
+        remote_name = upstream_ref.split("/", 1)[0]
+        self.run_to_log(["git", "fetch", remote_name])
+        if self.run_to_log(["git", "reset", "--hard", upstream_ref]):
             return True
         self.write_status("failed", "Git pull failed. Manual intervention required.", prev_version)
         self.log("FATAL: Could not update from remote.")

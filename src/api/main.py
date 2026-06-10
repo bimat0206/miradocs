@@ -2,10 +2,13 @@
 import json
 import logging
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Any
 
 logger = logging.getLogger(__name__)
+
+UPDATE_STATUS_TTL_SECONDS = 300
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -570,7 +573,7 @@ def create_app(
                 remote_version = resp.read().decode().strip()
         except Exception:
             return {"update_available": False, "local_version": local_version, "remote_version": local_version}
-        update_available = remote_version != local_version
+        update_available = _remote_version_is_newer(local_version, remote_version)
         return {"update_available": update_available, "local_version": local_version, "remote_version": remote_version}
 
     @app.post("/api/update")
@@ -594,14 +597,20 @@ def create_app(
 
     @app.get("/api/update-status")
     def update_status():
-        root = Path(__file__).resolve().parent.parent.parent
-        status_file = root / "data" / "update-status.json"
+        status_file = app.state.data_dir / "update-status.json"
         if not status_file.exists():
             return {"status": "idle", "version": _read_local_version()}
         try:
-            return json.loads(status_file.read_text())
+            status = json.loads(status_file.read_text())
         except Exception:
             return {"status": "idle", "version": _read_local_version()}
+        if _update_status_is_stale(status):
+            return {
+                "status": "failed",
+                "message": "Update status is stale. Check data/update.log for the last updater error.",
+                "version": status.get("version") or _read_local_version(),
+            }
+        return status
 
     # ── Export / Import ──────────────────────────────────────────
 
@@ -678,6 +687,45 @@ def _read_local_version() -> str:
         except FileNotFoundError:
             _LOCAL_VERSION = "0.0.0"
     return _LOCAL_VERSION
+
+
+def _version_key(version: str) -> tuple[int, ...] | None:
+    cleaned = version.strip().lower().removeprefix("v")
+    cleaned = cleaned.split("-", 1)[0].split("+", 1)[0]
+    parts: list[int] = []
+    for token in cleaned.split("."):
+        digits = ""
+        for char in token:
+            if not char.isdigit():
+                break
+            digits += char
+        if digits == "":
+            return None
+        parts.append(int(digits))
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def _remote_version_is_newer(local_version: str, remote_version: str) -> bool:
+    local_key = _version_key(local_version)
+    remote_key = _version_key(remote_version)
+    if local_key is None or remote_key is None:
+        return False
+    return remote_key > local_key
+
+
+def _update_status_is_stale(status: dict[str, Any]) -> bool:
+    if status.get("status") != "updating":
+        return False
+    raw_timestamp = status.get("timestamp")
+    if not isinstance(raw_timestamp, str):
+        return False
+    try:
+        updated_at = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (datetime.now(timezone.utc) - updated_at).total_seconds() > UPDATE_STATUS_TTL_SECONDS
 
 
 def _get_github_repo() -> str | None:

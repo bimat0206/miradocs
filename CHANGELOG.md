@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.7.2 - 2026-06-10
+
+### Fixed
+- **Auto-update false positives**: startup and API version checks now compare semantic version ordering, so a newer local release branch is not prompted to "update" to an older `main` version.
+- **Unsafe update fallback target**: failed `git pull --ff-only` recovery now resets to the current branch's configured upstream instead of hardcoded `origin/main`.
+- **Stash failure handling**: updater now aborts with a failed status if local tracked changes cannot be stashed, instead of continuing into pull/reset.
+- **Stale update status**: `/api/update-status` now marks old `updating` records as failed so the UI does not stay stuck after an abandoned update.
+
+---
+
 ## v1.7.1 - 2026-06-10
 
 ### Fixed
