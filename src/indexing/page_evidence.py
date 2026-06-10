@@ -157,11 +157,20 @@ class PageImageEvidence:
         return [t for t in tables_index if t.get("page") == page_number]
 
     def _load_page_text_cache(self, doc_id: str):
-        """Load all page text for a doc into memory once."""
+        """Load all page text for a doc into memory once.
+
+        Sources (tried in order):
+        1. Raw PDF → extract text per page with PyMuPDF.
+        2. Parsed chunks/page text from document.json (covers DOCX and other
+           non-PDF formats where no raw PDF exists).
+        3. Full markdown split into a single pseudo-page (last resort).
+        """
         if doc_id in self._page_text_cache:
             return
-        raw_path = self._find_raw_file(doc_id)
         cache: dict[int, str] = {}
+
+        # Strategy 1: extract from raw PDF
+        raw_path = self._find_raw_file(doc_id)
         if raw_path and raw_path.exists() and raw_path.suffix.lower() == ".pdf":
             try:
                 pdf = fitz.open(str(raw_path))
@@ -170,7 +179,51 @@ class PageImageEvidence:
                 pdf.close()
             except Exception:
                 pass
+
+        # Strategy 2: build page text from Docling's texts list in document.json
+        if not cache:
+            parsed_dir = get_parsed_dir(doc_id)
+            doc_json_path = parsed_dir / "document.json"
+            if doc_json_path.exists():
+                try:
+                    doc_data = json.loads(doc_json_path.read_text(encoding="utf-8"))
+                    cache = self._build_page_text_from_docling(doc_data)
+                except Exception:
+                    pass
+
+        # Strategy 3: fall back to full_document.md as page 1
+        if not cache:
+            parsed_dir = get_parsed_dir(doc_id)
+            md_path = parsed_dir / "full_document.md"
+            if md_path.exists():
+                try:
+                    cache[1] = md_path.read_text(encoding="utf-8")
+                except Exception:
+                    pass
+
         self._page_text_cache[doc_id] = cache
+
+    @staticmethod
+    def _build_page_text_from_docling(doc_data: dict) -> dict[int, str]:
+        """Build page→text mapping from Docling's texts/tables/pictures nodes."""
+        doc_dict = doc_data.get("doc_dict", doc_data)
+        page_parts: dict[int, list[str]] = {}
+        for key in ("texts", "tables", "pictures", "body", "main_text"):
+            items = doc_dict.get(key, [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text", "")
+                if not text:
+                    continue
+                prov = item.get("prov", [])
+                page = 1
+                if prov and isinstance(prov[0], dict):
+                    page = prov[0].get("page_no", prov[0].get("page", 1)) or 1
+                page_parts.setdefault(page, []).append(text)
+        return {pg: "\n".join(parts) for pg, parts in page_parts.items()}
 
     def _get_page_text(self, doc_id: str, page_number: int) -> str:
         self._load_page_text_cache(doc_id)

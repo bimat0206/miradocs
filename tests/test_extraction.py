@@ -9,6 +9,8 @@ from src.extraction.figure_extractor import extract_figures
 from src.extraction.page_image_extractor import extract_page_images
 from src.parsing.office_converter import convert_office_to_pdf
 from src.extraction.table_extractor import extract_tables
+from src.indexing.page_evidence import PageImageEvidence
+from src.parsing.docling_parser import _extract_sections
 
 
 def _mkdir_return(path: Path) -> Path:
@@ -182,6 +184,120 @@ def test_extract_tables_supports_docling_offset_cells(monkeypatch, tmp_path):
     assert result[0]["rows"] == 2
     assert result[0]["cols"] == 1
     assert (tables_dir / "table_003_00.csv").read_text().splitlines() == ["Version", "1.0"]
+
+
+def test_extract_tables_prefers_text_cells_when_docling_grid_contains_dicts(monkeypatch, tmp_path):
+    tables_dir = tmp_path / "tables" / "doc-grid-dicts"
+    monkeypatch.setattr(
+        "src.extraction.table_extractor.get_tables_dir",
+        lambda doc_id: _mkdir_return(tables_dir),
+    )
+
+    result = extract_tables(
+        {
+            "tables": [
+                {
+                    "table_id": "table_002_03",
+                    "page": 2,
+                    "data": {
+                        "num_rows": 1,
+                        "num_cols": 1,
+                        "grid": [
+                            [
+                                {
+                                    "bbox": {"l": 1, "t": 2, "r": 3, "b": 4},
+                                    "start_row_offset_idx": 0,
+                                    "start_col_offset_idx": 0,
+                                    "text": "Yeu Cau / Business Requirement",
+                                }
+                            ]
+                        ],
+                        "table_cells": [
+                            {
+                                "start_row_offset_idx": 0,
+                                "end_row_offset_idx": 1,
+                                "start_col_offset_idx": 0,
+                                "end_col_offset_idx": 1,
+                                "text": "Yeu Cau / Business Requirement",
+                            }
+                        ],
+                    },
+                },
+            ]
+        },
+        "doc-grid-dicts",
+    )
+
+    assert result[0]["rows"] == 1
+    markdown = (tables_dir / "table_002_03.md").read_text()
+    assert "Yeu Cau / Business Requirement" in markdown
+    assert "bbox" not in markdown
+
+
+def test_extract_sections_reads_docling_texts_and_table_heading_cells():
+    doc_dict = {
+        "body": {
+            "children": [
+                {"$ref": "#/tables/0"},
+                {"$ref": "#/texts/0"},
+                {"$ref": "#/texts/1"},
+            ]
+        },
+        "texts": [
+            {
+                "label": "section_header",
+                "text": "1.1 Business Objectives",
+                "prov": [{"page_no": 2}],
+            },
+            {
+                "label": "text",
+                "text": "2.1 Current Architecture",
+                "prov": [{"page_no": 3}],
+            },
+        ],
+        "tables": [
+            {
+                "prov": [{"page_no": 2}],
+                "data": {
+                    "num_rows": 1,
+                    "num_cols": 1,
+                    "table_cells": [
+                        {
+                            "start_row_offset_idx": 0,
+                            "start_col_offset_idx": 0,
+                            "text": "1. Business Requirement",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    sections = _extract_sections(doc_dict)
+
+    assert [section["title"] for section in sections] == [
+        "1. Business Requirement",
+        "1.1 Business Objectives",
+        "2.1 Current Architecture",
+    ]
+    assert [section["page_start"] for section in sections] == [2, 2, 3]
+
+
+def test_page_evidence_builds_text_from_persisted_docling_document_json():
+    doc_data = {
+        "doc_dict": {
+            "texts": [
+                {"text": "Page one", "prov": [{"page_no": 1}]},
+                {"text": "Page two", "prov": [{"page_no": 2}]},
+            ],
+            "tables": [],
+            "pictures": [],
+        }
+    }
+
+    page_text = PageImageEvidence._build_page_text_from_docling(doc_data)
+
+    assert page_text == {1: "Page one", 2: "Page two"}
 
 
 def test_extract_figures_writes_index_for_detected_figure(monkeypatch, tmp_path):

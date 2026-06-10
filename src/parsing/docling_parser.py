@@ -20,6 +20,7 @@ The accelerator can be overridden in ``config/settings.yaml`` under
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -344,24 +345,156 @@ def _auto_detect_device(AcceleratorDevice):
 # ─── Document-dict adapters (unchanged) ──────────────────────────────────────
 
 def _extract_sections(doc_dict: dict) -> list[dict]:
-    """Extract section hierarchy from Docling output."""
-    sections = []
+    """Extract section hierarchy from Docling output.
+
+    Handles both legacy Docling schema (body as list of items) and newer schema
+    where body is a dict with $ref children and actual text nodes live in a
+    top-level "texts" list.
+    """
+    candidates = []
+    ref_order = _body_ref_order(doc_dict)
+
+    # Strategy 1: top-level "texts" list (newer Docling schema).
+    # In this schema, body is a dict with children refs, and text nodes
+    # (including section_header) are stored in doc_dict["texts"].
+    texts = doc_dict.get("texts", [])
+    if isinstance(texts, list) and texts:
+        for i, item in enumerate(texts):
+            if not isinstance(item, dict):
+                continue
+            label = item.get("label", item.get("type", ""))
+            text = item.get("text", "")
+            if _is_heading_label(label) or _looks_like_numbered_heading(text) or _looks_like_unnumbered_title(text):
+                candidates.append((
+                    ref_order.get(f"#/texts/{i}", len(ref_order) + i),
+                    _section_dict(f"sec_text_{i:04d}", label, text, _extract_page(item)),
+                ))
+
+    # Docling often emits visually styled DOCX section titles as one-row tables.
+    tables = doc_dict.get("tables", [])
+    if isinstance(tables, list):
+        for i, item in enumerate(tables):
+            if not isinstance(item, dict):
+                continue
+            title = _table_heading_text(item.get("data", item.get("table_data", {})))
+            if title and (_looks_like_numbered_heading(title) or _looks_like_unnumbered_title(title)):
+                candidates.append((
+                    ref_order.get(f"#/tables/{i}", len(ref_order) + len(texts) + i),
+                    _section_dict(f"sec_table_{i:04d}", "section_header", title, _extract_page(item)),
+                ))
+
+    # Strategy 2: legacy schema where body is a flat list of items.
     body = doc_dict.get("body", doc_dict.get("main_text", []))
     if isinstance(body, list):
         for i, item in enumerate(body):
             if isinstance(item, dict):
                 label = item.get("label", item.get("type", ""))
-                if "heading" in label.lower() or "title" in label.lower():
-                    text = item.get("text", "")
-                    prov = item.get("prov", [{}])
-                    page = prov[0].get("page_no", prov[0].get("page", 0)) if prov else 0
-                    sections.append({
-                        "section_id": f"sec_{i:04d}",
-                        "title": text,
-                        "page_start": page,
-                        "level": _guess_heading_level(label, text),
-                    })
+                text = item.get("text", "")
+                if _is_heading_label(label) or _looks_like_numbered_heading(text) or _looks_like_unnumbered_title(text):
+                    candidates.append((
+                        len(ref_order) + len(texts) + len(tables) + i,
+                        _section_dict(f"sec_body_{i:04d}", label, text, _extract_page(item)),
+                    ))
+
+    sections = []
+    seen = set()
+    for _order, section in sorted(candidates, key=lambda item: item[0]):
+        title = section["title"]
+        key = (section["page_start"], title)
+        if title and key not in seen:
+            seen.add(key)
+            sections.append(section)
     return sections
+
+
+def _section_dict(section_id: str, label: str, text: str, page: int) -> dict:
+    return {
+        "section_id": section_id,
+        "title": text,
+        "page_start": page,
+        "level": _guess_heading_level(label, text),
+    }
+
+
+def _extract_page(item: dict) -> int:
+    prov = item.get("prov", [{}])
+    if prov and isinstance(prov[0], dict):
+        return prov[0].get("page_no", prov[0].get("page", 0)) or 0
+    return 0
+
+
+def _body_ref_order(doc_dict: dict) -> dict[str, int]:
+    body = doc_dict.get("body", {})
+    children = body.get("children", []) if isinstance(body, dict) else []
+    return {
+        child["$ref"]: idx
+        for idx, child in enumerate(children)
+        if isinstance(child, dict) and isinstance(child.get("$ref"), str)
+    }
+
+
+def _is_heading_label(label: str) -> bool:
+    """Return True if the label indicates a heading/section node."""
+    label_lower = label.lower()
+    return (
+        "heading" in label_lower
+        or "title" in label_lower
+        or "section_header" in label_lower
+    )
+
+
+def _looks_like_numbered_heading(text: str) -> bool:
+    title = " ".join(str(text or "").split())
+    return bool(re.match(r"^\d+(?:\.\d+)*\.?\s+\S+", title))
+
+
+def _looks_like_unnumbered_title(text: str) -> bool:
+    title = " ".join(str(text or "").split())
+    if not title or len(title) > 120:
+        return False
+    if title.lower().startswith(("please ", "describe ", "note:")):
+        return False
+    keywords = (
+        "architecture",
+        "requirement",
+        "strategy",
+        "model",
+        "compliance",
+        "overview",
+    )
+    title_lower = title.lower()
+    return any(keyword in title_lower for keyword in keywords) and (
+        " / " in title or title.istitle() or title.isupper()
+    )
+
+
+def _table_heading_text(data: Any) -> str:
+    if not isinstance(data, dict):
+        return ""
+    rows = int(data.get("num_rows") or 0)
+    cols = int(data.get("num_cols") or 0)
+    cells = data.get("table_cells", [])
+    if not rows and isinstance(data.get("grid"), list):
+        rows = len(data["grid"])
+        cols = max((len(row) for row in data["grid"] if isinstance(row, list)), default=0)
+    if rows != 1 or cols > 2:
+        return ""
+    row_cells = []
+    if isinstance(cells, list):
+        for cell in cells:
+            if not isinstance(cell, dict):
+                continue
+            row = cell.get("row", cell.get("row_index", cell.get("start_row_offset_idx", 0)))
+            if row == 0:
+                col = cell.get("col", cell.get("col_index", cell.get("start_col_offset_idx", 0)))
+                row_cells.append((col, str(cell.get("text", cell.get("content", "")))))
+    if not row_cells and isinstance(data.get("grid"), list) and data["grid"]:
+        for col, cell in enumerate(data["grid"][0]):
+            if isinstance(cell, dict):
+                row_cells.append((col, str(cell.get("text", cell.get("content", "")))))
+            else:
+                row_cells.append((col, str(cell)))
+    return " ".join(text for _col, text in sorted(row_cells) if text).strip()
 
 
 def _extract_tables(doc_dict: dict) -> list[dict]:

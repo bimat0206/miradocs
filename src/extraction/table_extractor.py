@@ -77,17 +77,48 @@ def _extract_grid(data: Any) -> list[list[str]]:
 
     # Docling table_data format: has "grid" or "table_cells"
     if isinstance(data, dict):
-        # Direct grid format
+        # Direct grid format — but verify cells are plain strings.
+        # Newer Docling versions may store full cell dicts in "grid" while
+        # clean text lives in "table_cells". Prefer table_cells when grid
+        # contains non-string entries.
         if "grid" in data:
-            return data["grid"]
-        # Cell-based format
+            grid = data["grid"]
+            if isinstance(grid, list) and grid and isinstance(grid[0], list):
+                # Check if cells are already strings
+                sample = grid[0][0] if grid[0] else None
+                if isinstance(sample, str):
+                    return grid
+                # Grid contains dicts — fall through to table_cells
+        # Cell-based format (preferred for newer Docling output)
         if "table_cells" in data:
             return _cells_to_grid(data["table_cells"], data.get("num_rows", 0), data.get("num_cols", 0))
+        # Fall back to grid with coercion if table_cells not available
+        if "grid" in data:
+            grid = data["grid"]
+            if isinstance(grid, list) and grid and isinstance(grid[0], list):
+                return _coerce_grid_cells(grid)
     # If data is already a list of lists
     if isinstance(data, list) and data and isinstance(data[0], list):
         return data
 
     return []
+
+
+def _coerce_grid_cells(grid: list[list]) -> list[list[str]]:
+    """Coerce grid cells to strings, extracting text from dicts if needed."""
+    result = []
+    for row in grid:
+        coerced_row = []
+        for cell in row:
+            if isinstance(cell, str):
+                coerced_row.append(cell)
+            elif isinstance(cell, dict):
+                # Docling cell dicts typically have a "text" or "content" key
+                coerced_row.append(cell.get("text", cell.get("content", str(cell))))
+            else:
+                coerced_row.append(str(cell))
+        result.append(coerced_row)
+    return result
 
 
 def _cells_to_grid(cells: list, num_rows: int, num_cols: int) -> list[list[str]]:

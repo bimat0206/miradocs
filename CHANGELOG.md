@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.7.1 - 2026-06-10
+
+### Fixed
+- **Docling DOCX section indexing**: section extraction now supports Docling's current `body` reference tree plus top-level `texts` nodes, including `section_header` labels and numbered heading text.
+- **Table-backed DOCX headings**: one-row Docling table headings are now promoted into section metadata so styled template headings no longer produce empty `document_structure.json` sections.
+- **DOCX page evidence text**: page evidence can now rebuild page text from persisted `document.json` Docling output instead of returning empty text for non-PDF documents.
+- **Docling table markdown**: table extraction now avoids writing bbox/cell dictionaries into markdown when Docling's `grid` contains structured cell objects.
+
+---
+
 ## v1.7.0 - 2026-06-04
 
 ### Added
