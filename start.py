@@ -588,18 +588,28 @@ class Launcher:
                 start_new_session=True,
             )
         self.log("Waiting for API to come up...")
-        for _ in range(30):
+        if not self.wait_for_http(f"http://localhost:{self.API_PORT}/api/health", "API", attempts=30):
+            self.write_status("failed", "Services failed to restart after update.", new_version)
+            self.log("ERROR: API did not become healthy within 60s.")
+            return 1
+        self.log("Waiting for frontend to come up...")
+        if not self.wait_for_http(f"http://localhost:{self.WEB_PORT}", "Frontend", attempts=30):
+            self.write_status("failed", "Frontend failed to restart after update.", new_version)
+            self.log("ERROR: Frontend did not become healthy within 60s.")
+            return 1
+        self.write_status("success", f"Updated to {new_version}", new_version)
+        self.log("=== Update Complete ===")
+        return 0
+
+    def wait_for_http(self, url: str, label: str, *, attempts: int = 30) -> bool:
+        for _ in range(attempts):
             try:
-                with urllib.request.urlopen(f"http://localhost:{self.API_PORT}/api/health", timeout=2):
-                    self.log("API is healthy.")
-                    self.write_status("success", f"Updated to {new_version}", new_version)
-                    self.log("=== Update Complete ===")
-                    return 0
+                with urllib.request.urlopen(url, timeout=2):
+                    self.log(f"{label} is healthy.")
+                    return True
             except Exception:
                 time.sleep(2)
-        self.write_status("failed", "Services failed to restart after update.", new_version)
-        self.log("ERROR: Services did not become healthy within 60s.")
-        return 1
+        return False
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

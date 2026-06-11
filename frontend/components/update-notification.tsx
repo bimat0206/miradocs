@@ -6,6 +6,7 @@ import {
   formatUpdateAvailableMessage,
   formatUpdateProgressMessage,
   formatVersionLabel,
+  getUpdatedAppUrl,
   isTerminalUpdateStatus,
   type HealthResponse,
   type UpdateStatusResponse,
@@ -13,6 +14,30 @@ import {
 } from "../lib/update-status";
 
 type UpdateState = "idle" | "available" | "updating" | "success" | "failed";
+
+async function clearBrowserAppCaches() {
+  if ("serviceWorker" in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  }
+  if ("caches" in window) {
+    const names = await caches.keys();
+    await Promise.all(names.map((name) => caches.delete(name)));
+  }
+}
+
+async function waitForFrontendReady(version?: string) {
+  const probeUrl = getUpdatedAppUrl(`${window.location.origin}/`, version);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const res = await fetch(probeUrl, { cache: "no-store" });
+      if (res.ok) return;
+    } catch {
+      // Frontend may still be restarting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
 
 export function UpdateNotification() {
   const [state, setState] = useState<UpdateState>("idle");
@@ -75,7 +100,14 @@ export function UpdateNotification() {
               ? `Updated to ${formatVersionLabel(data.version || remoteVersion)}`
               : data.message || "Update failed. Check logs.");
             if (data.status === "success") {
-              setTimeout(() => window.location.reload(), 2000);
+              const version = data.version || remoteVersion;
+              await waitForFrontendReady(version);
+              try {
+                await clearBrowserAppCaches();
+              } catch {
+                // Cache cleanup is best-effort; the versioned navigation below is the critical step.
+              }
+              setTimeout(() => window.location.replace(getUpdatedAppUrl(window.location.href, version)), 1000);
             }
           }
         } else {

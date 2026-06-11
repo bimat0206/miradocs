@@ -34,3 +34,11 @@ export function formatUpdateProgressMessage(localVersion: string, remoteVersion:
 export function isTerminalUpdateStatus(status: UpdateStatus) {
   return status === "success" || status === "failed";
 }
+
+export function getUpdatedAppUrl(currentHref: string, version?: string | null, now = Date.now()) {
+  const url = new URL(currentHref);
+  const normalizedVersion = version?.trim() || "unknown";
+  url.searchParams.set("miradocs_updated", normalizedVersion);
+  url.searchParams.set("reload", String(now));
+  return url.toString();
+}

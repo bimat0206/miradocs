@@ -121,6 +121,7 @@ def test_version_check_does_not_offer_older_remote_version(monkeypatch):
 
     monkeypatch.setattr(api_main, "_read_local_version", lambda: "1.7.2")
     monkeypatch.setattr(api_main, "_get_github_repo", lambda: "example/miradocs")
+    monkeypatch.setattr(api_main, "_read_remote_main_version_from_git", lambda: None)
 
     with patch("urllib.request.urlopen", return_value=FakeResponse()):
         response = client.get("/api/version-check")
@@ -130,6 +131,41 @@ def test_version_check_does_not_offer_older_remote_version(monkeypatch):
         "update_available": False,
         "local_version": "1.7.2",
         "remote_version": "1.7.1",
+    }
+
+
+def test_version_check_prefers_git_remote_version_over_raw_github(monkeypatch):
+    client = TestClient(create_app())
+
+    class FakeRawResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"1.7.2\n"
+
+    def fake_run(args, **kwargs):
+        if args == ["git", "fetch", "--quiet", "origin", "main"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args == ["git", "show", "FETCH_HEAD:VERSION"]:
+            return subprocess.CompletedProcess(args, 0, "1.8.1\n", "")
+        raise AssertionError(f"unexpected subprocess call: {args}")
+
+    monkeypatch.setattr(api_main, "_read_local_version", lambda: "1.7.2")
+    monkeypatch.setattr(api_main, "_get_github_repo", lambda: "example/miradocs")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with patch("urllib.request.urlopen", return_value=FakeRawResponse()):
+        response = client.get("/api/version-check")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "update_available": True,
+        "local_version": "1.7.2",
+        "remote_version": "1.8.1",
     }
 
 

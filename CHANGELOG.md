@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.8.2 - 2026-06-11
+
+### Fixed
+- **Auto-update version detection**: update checks now prefer a fresh `git fetch origin main` and read `VERSION` from `FETCH_HEAD`, avoiding stale GitHub raw responses after a release push.
+- **Auto-update frontend consistency**: update success now waits for both backend and frontend readiness, then navigates through a versioned cache-busting URL so the browser does not keep old UI assets.
+
+---
+
 ## v1.8.1 - 2026-06-11
 
 ### Fixed

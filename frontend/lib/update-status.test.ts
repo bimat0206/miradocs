@@ -3,6 +3,7 @@ import {
   formatUpdateAvailableMessage,
   formatUpdateProgressMessage,
   formatVersionLabel,
+  getUpdatedAppUrl,
   isTerminalUpdateStatus,
 } from "./update-status";
 
@@ -29,5 +30,11 @@ describe("update status helpers", () => {
     expect(isTerminalUpdateStatus("failed")).toBe(true);
     expect(isTerminalUpdateStatus("updating")).toBe(false);
     expect(isTerminalUpdateStatus("idle")).toBe(false);
+  });
+
+  it("builds a cache-busting URL for the updated app", () => {
+    expect(getUpdatedAppUrl("http://localhost:3000/workspace?tab=inspect&miradocs_updated=old", "1.8.1", 42)).toBe(
+      "http://localhost:3000/workspace?tab=inspect&miradocs_updated=1.8.1&reload=42"
+    );
   });
 });

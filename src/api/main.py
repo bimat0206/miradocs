@@ -675,7 +675,12 @@ def create_app(
     def version_check():
         import urllib.request
         local_version = _read_local_version()
-        # Check GitHub for latest VERSION file on main branch
+        remote_version = _read_remote_main_version_from_git()
+        if remote_version:
+            update_available = _remote_version_is_newer(local_version, remote_version)
+            return {"update_available": update_available, "local_version": local_version, "remote_version": remote_version}
+
+        # Fallback to GitHub's raw VERSION file when git metadata is unavailable.
         repo = _get_github_repo()
         if not repo:
             return {"update_available": False, "local_version": local_version, "remote_version": local_version}
@@ -826,6 +831,36 @@ def _remote_version_is_newer(local_version: str, remote_version: str) -> bool:
     if local_key is None or remote_key is None:
         return False
     return remote_key > local_key
+
+
+def _read_remote_main_version_from_git() -> str | None:
+    """Read VERSION from freshly fetched origin/main without relying on raw GitHub cache."""
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent.parent
+    try:
+        fetch = subprocess.run(
+            ["git", "fetch", "--quiet", "origin", "main"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            cwd=root,
+        )
+        if fetch.returncode != 0:
+            return None
+        show = subprocess.run(
+            ["git", "show", "FETCH_HEAD:VERSION"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=root,
+        )
+        if show.returncode != 0:
+            return None
+        version = show.stdout.strip()
+        return version if _version_key(version) is not None else None
+    except Exception:
+        return None
 
 
 def _update_status_is_stale(status: dict[str, Any]) -> bool:
