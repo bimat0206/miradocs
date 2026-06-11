@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertCircle,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -8,17 +9,20 @@ import {
   GitCompareArrows,
   Info,
   Library,
+  Loader2,
   PanelLeftClose,
   Search,
   Sparkles,
   Trash2,
   UploadCloud,
+  X,
 } from "lucide-react";
 import { type RefObject, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { StatusPill } from "@/components/ui/status-pill";
-import { exportWorkspaceUrl, importWorkspace, type ImportResult } from "@/lib/api";
-import type { DocumentRecord } from "@/lib/types";
+import { exportWorkspaceUrl, importWorkspace, fetchGroups, suggestGroup, uploadDocument, type ImportResult } from "@/lib/api";
+import type { DocumentRecord, DocumentGroup } from "@/lib/types";
 
 const DOCS_PER_PAGE = 8;
 
@@ -29,6 +33,7 @@ interface LibraryPanelProps {
   setSelectedDocIds: (value: string[]) => void;
   fileInput: RefObject<HTMLInputElement | null>;
   onUpload: (file: File) => void;
+  onUploadComplete?: (doc: DocumentRecord) => void;
   onSelect: (docId: string) => void;
   isUploading: boolean;
   onDeleteMultiple: (docIds: string[]) => void;
@@ -47,6 +52,7 @@ export function LibraryPanel({
   setSelectedDocIds,
   fileInput,
   onUpload,
+  onUploadComplete,
   onSelect,
   isUploading,
   onDeleteMultiple,
@@ -57,9 +63,105 @@ export function LibraryPanel({
   onToggle,
   onImportComplete,
 }: LibraryPanelProps) {
+  const queryClient = useQueryClient();
   const hasSelection = selectedDocIds.length > 0;
   const canCompare = selectedDocIds.length === 2;
   const [query, setQuery] = useState("");
+
+  // Upload modal states
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [linkToGroup, setLinkToGroup] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [versionLabel, setVersionLabel] = useState("");
+  const [versionNotes, setVersionNotes] = useState("");
+  const [suggestedGroup, setSuggestedGroup] = useState<DocumentGroup | null>(null);
+  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+  const [customGroupName, setCustomGroupName] = useState("");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const groupsQuery = useQuery({
+    queryKey: ["version-groups", "default"],
+    queryFn: () => fetchGroups("default"),
+  });
+  const groups = groupsQuery.data ?? [];
+
+  useEffect(() => {
+    if (!pendingFile) {
+      setSuggestedGroup(null);
+      setLinkToGroup(false);
+      setSelectedGroupId("");
+      setVersionLabel("");
+      setVersionNotes("");
+      setCustomGroupName("");
+      return;
+    }
+
+    setLoadingSuggestion(true);
+    suggestGroup(pendingFile.name, "default")
+      .then((group: DocumentGroup | null) => {
+        if (group) {
+          setSuggestedGroup(group);
+          setLinkToGroup(true);
+          setSelectedGroupId(group.group_id);
+        } else {
+          setSuggestedGroup(null);
+          setLinkToGroup(false);
+          setSelectedGroupId("");
+        }
+      })
+      .catch(() => {
+        setSuggestedGroup(null);
+      })
+      .finally(() => {
+        setLoadingSuggestion(false);
+      });
+  }, [pendingFile]);
+
+  async function handleSubmitUpload() {
+    if (!pendingFile) return;
+    setIsSubmitting(true);
+    setUploadError(null);
+    try {
+      const form = new FormData();
+      form.append("file", pendingFile);
+      form.append("project", "default");
+      if (linkToGroup && selectedGroupId) {
+        form.append("version_group_id", selectedGroupId);
+        form.append("version_label", versionLabel);
+        form.append("version_notes", versionNotes);
+        form.append("auto_group", "false");
+      } else {
+        form.append("auto_group", "false");
+        if (customGroupName) {
+          form.append("group_name", customGroupName);
+        }
+      }
+
+      const doc = await uploadDocument(form);
+      setPendingFile(null);
+      onUploadComplete?.(doc);
+      queryClient.invalidateQueries({ queryKey: ["version-groups"] });
+    } catch (err: any) {
+      console.error(err);
+      try {
+        const parsed = JSON.parse(err.message);
+        if (parsed.detail && parsed.detail.duplicate) {
+          const dup = parsed.detail;
+          const verInfo = dup.existing_version
+            ? `as ${dup.existing_version.version_label} (v${dup.existing_version.version_number})`
+            : "";
+          setUploadError(`Duplicate detected: This document has already been uploaded ${verInfo}.`);
+        } else {
+          setUploadError(err.message || "Failed to upload document.");
+        }
+      } catch {
+        setUploadError(err.message || "Failed to upload document.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   // Export / Import state
   const [importState, setImportState] = useState<
@@ -151,7 +253,11 @@ export function LibraryPanel({
           className="hidden"
           onChange={(event) => {
             const file = event.target.files?.[0];
-            if (file) onUpload(file);
+            if (file) {
+              setPendingFile(file);
+              setUploadError(null);
+            }
+            event.target.value = "";
           }}
         />
         <button
@@ -159,7 +265,7 @@ export function LibraryPanel({
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-300 to-violet-500 px-4 py-3 font-medium text-slate-950 transition hover:scale-[1.01]"
         >
           <UploadCloud size={18} />
-          {isUploading ? "Uploading..." : "Upload document"}
+          Upload document
         </button>
       </div>
       <div className="thin-scrollbar flex-1 min-h-0 overflow-y-auto p-3 max-h-[400px] lg:max-h-none">
@@ -436,6 +542,135 @@ export function LibraryPanel({
           </button>
         </div>
       </div>
+      {pendingFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+                <UploadCloud className="text-cyan-400" size={20} />
+                Upload Ingest Settings
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPendingFile(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-xl bg-white/[0.03] p-3 border border-white/5">
+                <p className="text-xs text-slate-500">Selected File</p>
+                <p className="text-sm font-medium text-slate-200 truncate mt-0.5">{pendingFile.name}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">{(pendingFile.size / 1024 / 1024).toFixed(2)} MB</p>
+              </div>
+
+              {uploadError && (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-300 flex items-start gap-2">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>{uploadError}</span>
+                </div>
+              )}
+
+              <label className="flex items-center gap-2.5 cursor-pointer py-1.5 select-none">
+                <input
+                  type="checkbox"
+                  checked={linkToGroup}
+                  onChange={(e) => setLinkToGroup(e.target.checked)}
+                  className="h-4 w-4 rounded border-white/15 bg-slate-900/60 text-cyan-400 focus:ring-0 cursor-pointer"
+                />
+                <span className="text-xs text-slate-300 font-medium">Link as new version of existing group?</span>
+              </label>
+
+              {linkToGroup ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Select Group</label>
+                    {loadingSuggestion ? (
+                      <div className="h-10 flex items-center gap-2 px-3 border border-white/10 bg-slate-900/40 rounded-xl text-xs text-slate-500">
+                        <Loader2 size={12} className="animate-spin text-cyan-400" />
+                        Analyzing filename...
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedGroupId}
+                        onChange={(e) => setSelectedGroupId(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-white/10 bg-slate-900/60 px-3 text-xs text-slate-200 outline-none focus:border-cyan-400/40"
+                      >
+                        <option value="">-- Choose Group --</option>
+                        {groups.map((g) => (
+                          <option key={g.group_id} value={g.group_id}>
+                            {g.name} ({g.version_count} versions)
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {suggestedGroup && selectedGroupId === suggestedGroup.group_id && (
+                      <p className="mt-1 text-[10px] text-cyan-300 flex items-center gap-1">
+                        <Sparkles size={10} />
+                        Auto-suggested match based on filename
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Version Label (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. v2, Draft, Final (default: auto vN)"
+                      value={versionLabel}
+                      onChange={(e) => setVersionLabel(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-white/10 bg-slate-900/60 px-3 text-xs text-slate-200 outline-none focus:border-cyan-400/40"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Changelog Notes (Optional)</label>
+                    <textarea
+                      placeholder="What changed in this version?"
+                      value={versionNotes}
+                      onChange={(e) => setVersionNotes(e.target.value)}
+                      rows={2}
+                      className="w-full rounded-xl border border-white/10 bg-slate-900/60 p-3 text-xs text-slate-200 outline-none focus:border-cyan-400/40 resize-none"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Custom Group Name (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="Defaults to normalized filename stem"
+                    value={customGroupName}
+                    onChange={(e) => setCustomGroupName(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-white/10 bg-slate-900/60 px-3 text-xs text-slate-200 outline-none focus:border-cyan-400/40"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setPendingFile(null)}
+                className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting || (linkToGroup && !selectedGroupId)}
+                onClick={handleSubmitUpload}
+                className="flex items-center gap-1.5 rounded-xl bg-cyan-400 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {isSubmitting && <Loader2 size={12} className="animate-spin" />}
+                Process & Ingest
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

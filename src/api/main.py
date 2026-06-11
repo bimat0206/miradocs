@@ -20,6 +20,7 @@ from src.intake.document_registry import DocumentRegistry
 from src.services.document_service import (
     create_document,
     delete_document,
+    delete_document_version,
     list_documents,
     page_image_matches,
     page_image_path,
@@ -81,6 +82,16 @@ class CompareRunRequest(BaseModel):
     mode: str = "auto"
 
 
+class GroupUpdateRequest(BaseModel):
+    name: str | None = None
+    notes: str | None = None
+
+
+class VersionCompareRequest(BaseModel):
+    source_version: int
+    target_version: int
+
+
 def _default_index_adapter_factory():
     from src.indexing.qdrant_adapter import QdrantAdapter
     return QdrantAdapter()
@@ -96,7 +107,12 @@ def create_app(
     app = FastAPI(title="MiraDocs API", version=_read_local_version())
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_origins=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://host.docker.internal:3000",
+            "http://0.0.0.0:3000",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -140,6 +156,12 @@ def create_app(
         domain: str = Form("General"),
         sensitivity: str = Form("Internal"),
         tags: str = Form("[]"),
+        # Version control fields
+        version_group_id: str | None = Form(None),
+        version_label: str | None = Form(None),
+        version_notes: str = Form(""),
+        auto_group: bool = Form(True),
+        group_name: str | None = Form(None),
     ):
         file_bytes = await file.read()
         doc = create_document(
@@ -152,7 +174,14 @@ def create_app(
             tags=parse_upload_tags(tags),
             registry=app.state.registry,
             data_dir=app.state.data_dir,
+            version_group_id=version_group_id,
+            version_label=version_label,
+            version_notes=version_notes,
+            auto_group=auto_group,
+            group_name=group_name,
         )
+        if doc.get("duplicate"):
+            raise HTTPException(status_code=409, detail=doc)
         return doc
 
     @app.get("/api/documents/{doc_id}")
@@ -450,6 +479,90 @@ def create_app(
             raise HTTPException(status_code=400, detail=result)
         app.state.registry.update_step(doc_id, "indexed", "success")
         return result
+
+    # ── Version Groups ─────────────────────────────────────────────
+
+    @app.get("/api/groups")
+    def list_version_groups(project: str | None = None):
+        groups = app.state.registry.list_groups(project=project)
+        return {"groups": groups}
+
+    @app.get("/api/groups/suggest")
+    def suggest_version_group(filename: str, project: str = "default"):
+        """Suggest an existing group for a given filename."""
+        from src.intake.version_matcher import auto_match_group
+        group_id = auto_match_group(filename, project, app.state.registry)
+        if not group_id:
+            return {"group": None}
+        group = app.state.registry.get_group(group_id, include_versions=False)
+        return {"group": group}
+
+    @app.get("/api/groups/{group_id}")
+    def get_version_group(group_id: str):
+        group = app.state.registry.get_group(group_id, include_versions=True)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        return group
+
+    @app.patch("/api/groups/{group_id}")
+    def update_version_group(group_id: str, request: GroupUpdateRequest):
+        updated = app.state.registry.update_group(
+            group_id, name=request.name, notes=request.notes
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Group not found")
+        return updated
+
+    @app.get("/api/groups/{group_id}/versions")
+    def list_group_versions(group_id: str):
+        group = app.state.registry.get_group(group_id, include_versions=False)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        versions = app.state.registry.get_versions_for_group(group_id)
+        return {"group_id": group_id, "versions": versions}
+
+    @app.post("/api/groups/{group_id}/compare")
+    def compare_group_versions(group_id: str, request: VersionCompareRequest):
+        if request.source_version == request.target_version:
+            raise HTTPException(status_code=400, detail="source_version and target_version must differ")
+        from src.services.version_diff_service import compare_versions, VersionDiffError
+        try:
+            result = compare_versions(
+                group_id=group_id,
+                source_version=request.source_version,
+                target_version=request.target_version,
+                registry=app.state.registry,
+                data_dir=app.state.data_dir,
+            )
+        except VersionDiffError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return result
+
+    @app.delete("/api/groups/{group_id}/versions/{version_number}")
+    def delete_version(group_id: str, version_number: int):
+        group = app.state.registry.get_group(group_id, include_versions=False)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        result = delete_document_version(
+            group_id=group_id,
+            version_number=version_number,
+            registry=app.state.registry,
+            data_dir=app.state.data_dir,
+            index_adapter_factory=app.state.index_adapter_factory,
+        )
+        if result["status"] == "not_found":
+            raise HTTPException(status_code=404, detail="Version not found")
+        return result
+
+    @app.get("/api/documents/{doc_id}/version")
+    def get_document_version(doc_id: str):
+        if not app.state.registry.get_document(doc_id):
+            raise HTTPException(status_code=404, detail="Document not found")
+        version = app.state.registry.get_version_for_doc(doc_id)
+        group = None
+        if version:
+            group = app.state.registry.get_group(version["group_id"], include_versions=True)
+        return {"version": version, "group": group}
 
     @app.get("/api/documents/{doc_id}/index/status")
     def index_status(doc_id: str):

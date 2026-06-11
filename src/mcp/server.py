@@ -69,6 +69,8 @@ TOOLS = [
                 "include_page_images": {"type": "boolean", "description": "Include page image paths", "default": True},
                 "include_tables": {"type": "boolean", "description": "Include table references", "default": True},
                 "search_mode": {"type": "string", "enum": ["auto", "semantic", "keyword", "hybrid", "graph_local"], "default": "auto"},
+                "version_group_id": {"type": "string", "description": "Search across all versions of this document group"},
+                "version_number": {"type": "integer", "description": "Restrict to a specific version number within the group"},
             },
             "required": ["query"],
         },
@@ -371,6 +373,52 @@ TOOLS = [
             "required": ["path"],
         },
     },
+    {
+        "name": "list_version_groups",
+        "description": "List all document version groups with version counts and latest info.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Filter by project name"},
+                "doc_id": {"type": "string", "description": "Resolve the group containing this document"},
+            },
+        },
+    },
+    {
+        "name": "get_version_group",
+        "description": "Get detailed version history for a document group.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "string", "description": "Version group ID"},
+            },
+            "required": ["group_id"],
+        },
+    },
+    {
+        "name": "get_version_for_doc",
+        "description": "Find which group and version a given document belongs to.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "Document ID to look up version info for"},
+            },
+            "required": ["doc_id"],
+        },
+    },
+    {
+        "name": "compare_versions",
+        "description": "Run a semantic version diff between two versions of a document group.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "string", "description": "Version group ID"},
+                "source_version": {"type": "integer", "description": "Version number of the older (source) version"},
+                "target_version": {"type": "integer", "description": "Version number of the newer (target) version"},
+            },
+            "required": ["group_id", "source_version", "target_version"],
+        },
+    },
 ]
 
 def _read_version() -> str:
@@ -426,6 +474,10 @@ try:
         "get_entity_relationships": (_schemas.GetEntityRelationshipsInput, _tools.get_entity_relationships),
         "export_workspace": (_schemas.ExportWorkspaceInput, _tools.export_workspace),
         "import_workspace": (_schemas.ImportWorkspaceInput, _tools.import_workspace),
+        "list_version_groups": (_schemas.ListVersionGroupsInput, _tools.list_version_groups),
+        "get_version_group": (_schemas.GetVersionGroupInput, _tools.get_version_group),
+        "get_version_for_doc": (_schemas.GetVersionForDocInput, _tools.get_version_for_doc),
+        "compare_versions": (_schemas.CompareVersionsInput, _tools.compare_versions),
     }
 except Exception as _dispatch_err:  # pragma: no cover
     logger.error("Failed to build MCP DISPATCH table: %s", _dispatch_err)

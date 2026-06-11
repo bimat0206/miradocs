@@ -60,6 +60,9 @@ class RetrievalService:
         max_top_k = self._cfg.get("mcp", {}).get("max_top_k", 20)
         top_k = min(top_k, max_top_k)
 
+        # Resolve version group filters to document IDs
+        filters = self._resolve_version_filters(filters)
+
         results: list[dict] = []
         mode_used = "fallback"
         warnings: list[str] = []
@@ -83,6 +86,9 @@ class RetrievalService:
                 mode_used = "fallback"
                 if not results:
                     warnings.append("No results found in any search mode")
+
+        # Enrich results with doc metadata and version info
+        results = self._enrich_results(results, filters)
 
         # Add parent section context before normalizing
         results = self._expand_parent_context(results)
@@ -130,7 +136,7 @@ class RetrievalService:
                     qdrant_filters["doc_id"] = filters["doc_id"]
             results = engine.search(query, top_k=top_k, filters=qdrant_filters or None)
             if results:
-                return self._enrich_results(results, filters), "hybrid"
+                return results, "hybrid"
         except Exception as e:
             logger.warning("Vector search unavailable: %s", e)
         return [], ""
@@ -180,20 +186,61 @@ class RetrievalService:
         return True
 
     def _enrich_results(self, results: list[dict], filters: dict | None) -> list[dict]:
-        """Enrich vector search results with doc metadata if available."""
+        """Enrich results with doc metadata and version info if available."""
         try:
             registry = _get_registry()
             doc_ids = list({r.get("doc_id", "") for r in results if r.get("doc_id")})
             docs = {d["doc_id"]: d for d in registry.get_documents_batch(doc_ids)}
             for r in results:
-                doc = docs.get(r.get("doc_id", ""))
+                did = r.get("doc_id", "")
+                doc = docs.get(did)
                 if doc:
                     r["source_file"] = doc.get("filename", "")
                     r["document_type"] = doc.get("document_type", "")
                     r["domain"] = doc.get("domain", "")
-        except Exception:
-            pass
+
+                if did:
+                    v = registry.get_version_for_doc(did)
+                    if v:
+                        r["version_label"] = v.get("version_label")
+                        r["version_number"] = v.get("version_number")
+        except Exception as e:
+            logger.error("Failed to enrich results: %s", e)
         return results
+
+    def _resolve_version_filters(self, filters: dict | None) -> dict | None:
+        """Resolve version_group_id and version_number into concrete doc_ids."""
+        if not filters:
+            return None
+
+        version_group_id = filters.get("version_group_id")
+        version_number = filters.get("version_number")
+
+        if not version_group_id:
+            return filters
+
+        # Clone filters to avoid side-effects
+        resolved = dict(filters)
+
+        registry = _get_registry()
+        versions = registry.get_versions_for_group(version_group_id)
+        if version_number is not None:
+            versions = [v for v in versions if v["version_number"] == version_number]
+
+        doc_ids = [v["doc_id"] for v in versions]
+
+        # Override doc_id filter
+        if doc_ids:
+            existing_doc_id = filters.get("doc_id")
+            if existing_doc_id:
+                existing_ids = [existing_doc_id] if isinstance(existing_doc_id, str) else list(existing_doc_id)
+                resolved["doc_id"] = [did for did in doc_ids if did in existing_ids]
+            else:
+                resolved["doc_id"] = doc_ids
+        else:
+            resolved["doc_id"] = ["__nonexistent_doc_id__"]
+
+        return resolved
 
     # ─── Graph-local search ───────────────────────────────────────────────────
 

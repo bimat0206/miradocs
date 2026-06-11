@@ -14,6 +14,8 @@ class SearchDocsInput(BaseModel):
     include_page_images: bool = Field(default=True, description="Include page image paths in results")
     include_tables: bool = Field(default=True, description="Include table references in results")
     search_mode: str = Field(default="auto", description="Search mode: auto, semantic, keyword, hybrid, graph_local")
+    version_group_id: str | None = Field(default=None, description="Search across all versions of this document group")
+    version_number: int | None = Field(default=None, description="Restrict to a specific version number within the group")
 
 
 class SearchResultItem(BaseModel):
@@ -36,6 +38,8 @@ class SearchResultItem(BaseModel):
     parent_chunk_id: str = ""
     parent_text: str = ""
     parent_section_path: str = ""
+    version_label: str | None = None
+    version_number: int | None = None
 
 
 class SearchDocsOutput(BaseModel):
@@ -332,3 +336,51 @@ class GetEntityRelationshipsOutput(BaseModel):
     entity_value: str
     neighbor_count: int
     relationships: list[EntityRelationship] = Field(default_factory=list)
+
+
+# ─── version control schemas ────────────────────────────────────────────────
+
+class VersionSummary(BaseModel):
+    version_id: str
+    group_id: str
+    doc_id: str
+    version_label: str
+    version_number: int
+    is_latest: bool = False
+    notes: str = ""
+    created_at: str = ""
+    filename: str | None = None
+    page_count: int | None = None
+    status: str | None = None
+    upload_time: str | None = None
+
+
+class VersionGroupOutput(BaseModel):
+    group_id: str
+    name: str
+    base_filename: str
+    project: str
+    notes: str = ""
+    version_count: int = 0
+    latest_doc_id: str | None = None
+    latest_label: str | None = None
+    versions: list[VersionSummary] = Field(default_factory=list)
+
+
+class ListVersionGroupsInput(BaseModel):
+    project: str | None = Field(default=None, description="Filter by project name")
+    doc_id: str | None = Field(default=None, description="Resolve the group containing this document")
+
+
+class GetVersionGroupInput(BaseModel):
+    group_id: str = Field(..., description="Version group ID")
+
+
+class GetVersionForDocInput(BaseModel):
+    doc_id: str = Field(..., description="Document ID to look up version info for")
+
+
+class CompareVersionsInput(BaseModel):
+    group_id: str = Field(..., description="Version group ID")
+    source_version: int = Field(..., description="Version number of the older (source) version")
+    target_version: int = Field(..., description="Version number of the newer (target) version")

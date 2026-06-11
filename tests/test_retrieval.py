@@ -119,3 +119,80 @@ class TestKeywordSearchChunks:
         assert any(r["chunk_id"] == "child1" for r in results)
         assert all(r["chunk_id"] != "child2" for r in results)
         assert "score" in results[0]
+
+
+class TestVersionAwareRetrieval:
+    def test_search_docs_with_version_filters(self, monkeypatch, _temp_data_dir):
+        # We need a real/temp registry and mock its connection
+        from src.intake.document_registry import DocumentRegistry
+        registry = DocumentRegistry(db_path=_temp_data_dir / "registry.db")
+
+        # Patch the _get_registry singleton in retrieval_service to return our registry
+        monkeypatch.setattr("src.retrieval.retrieval_service._get_registry", lambda: registry)
+
+        # Register a version group and documents
+        doc1_id = registry.register_document("Architecture_v1.pdf", "pdf", 10, "hash-v1")
+        doc2_id = registry.register_document("Architecture_v2.pdf", "pdf", 12, "hash-v2")
+
+        # Write chunks for doc1
+        parsed1 = _temp_data_dir / "parsed" / doc1_id
+        parsed1.mkdir(parents=True)
+        import json
+        (parsed1 / "chunks.json").write_text(json.dumps([
+            {
+                "chunk_id": "doc1_child1",
+                "chunk_type": "child_text_chunk",
+                "section_path": "1. Intro",
+                "text": "architecture version one is here.",
+                "parent_chunk_id": None,
+            }
+        ]))
+
+        # Write chunks for doc2 so search doesn't fail to load them
+        parsed2 = _temp_data_dir / "parsed" / doc2_id
+        parsed2.mkdir(parents=True)
+        import json
+        (parsed2 / "chunks.json").write_text(json.dumps([
+            {
+                "chunk_id": "doc2_child1",
+                "chunk_type": "child_text_chunk",
+                "section_path": "1. Intro",
+                "text": "architecture version two is here.",
+                "parent_chunk_id": None,
+            }
+        ]))
+
+        g = registry.create_or_find_group("Architecture", "architecture", "default")
+        registry.add_version(g["group_id"], doc1_id)
+        registry.add_version(g["group_id"], doc2_id)
+        registry.set_latest_version(g["group_id"], doc2_id)
+
+        service = RetrievalService()
+
+        # 1. Search without version filters (matches both)
+        res_all = service.search_docs("architecture", filters=None)
+        assert res_all.result_count > 0
+
+        # 2. Search filtering by version group
+        res_group = service.search_docs("architecture", filters={"version_group_id": g["group_id"]})
+        # Result chunks should have version labels set!
+        assert res_group.result_count > 0
+        for item in res_group.results:
+            assert item.version_label in ("v1", "v2")
+            assert item.version_number in (1, 2)
+
+        # 3. Search filtering by version group AND version number = 1
+        res_v1 = service.search_docs("architecture", filters={"version_group_id": g["group_id"], "version_number": 1})
+        assert res_v1.result_count > 0
+        for item in res_v1.results:
+            assert item.doc_id == doc1_id
+            assert item.version_label == "v1"
+            assert item.version_number == 1
+
+        # 4. Search filtering by version group AND version number = 2
+        res_v2 = service.search_docs("architecture", filters={"version_group_id": g["group_id"], "version_number": 2})
+        assert res_v2.result_count > 0
+        for item in res_v2.results:
+            assert item.doc_id == doc2_id
+            assert item.version_label == "v2"
+            assert item.version_number == 2

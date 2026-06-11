@@ -139,6 +139,8 @@ export type SearchResult = {
     section_path: string;
     table_file?: string | null;
   };
+  version_label?: string | null;
+  version_number?: number | null;
 };
 
 export type SearchOptions = {
@@ -271,4 +273,31 @@ export type CompareModeDetection = {
   detected_mode: CompareMode;
   confidence: number;
   reasons: string[];
+};
+
+export type VersionSummary = {
+  version_id: string;
+  group_id: string;
+  doc_id: string;
+  version_label: string;
+  version_number: number;
+  is_latest: boolean;
+  notes: string;
+  created_at: string;
+  filename?: string | null;
+  page_count?: number | null;
+  status?: string | null;
+  upload_time?: string | null;
+};
+
+export type DocumentGroup = {
+  group_id: string;
+  name: string;
+  base_filename: string;
+  project: string;
+  notes: string;
+  version_count: number;
+  latest_doc_id?: string | null;
+  latest_label?: string | null;
+  versions?: VersionSummary[];
 };

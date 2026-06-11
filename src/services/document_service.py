@@ -61,11 +61,18 @@ def create_document(
     tags: list[str] | None = None,
     registry: DocumentRegistry,
     data_dir: Path,
+    # Version control options
+    version_group_id: str | None = None,
+    version_label: str | None = None,
+    version_notes: str = "",
+    auto_group: bool = True,
+    group_name: str | None = None,
 ) -> dict:
     sha256 = compute_sha256(file_bytes)
     existing = registry.find_by_hash(sha256)
     if existing:
-        return {**existing, "duplicate": True}
+        existing_ver = registry.get_version_for_doc(existing["doc_id"])
+        return {**existing, "duplicate": True, "existing_version": existing_ver}
 
     doc_id = registry.register_document(
         filename=filename,
@@ -80,13 +87,43 @@ def create_document(
     )
     if not doc_id:
         existing = registry.find_by_hash(sha256)
-        return {**existing, "duplicate": True} if existing else {"duplicate": True}
+        if existing:
+            existing_ver = registry.get_version_for_doc(existing["doc_id"])
+            return {**existing, "duplicate": True, "existing_version": existing_ver}
+        return {"duplicate": True}
 
     raw_dir = data_dir / "raw" / project / doc_id
     raw_dir.mkdir(parents=True, exist_ok=True)
     (raw_dir / filename).write_bytes(file_bytes)
+
+    # ── Version group assignment ──────────────────────────────────────────────────
+    group = None
+    if version_group_id:
+        group = registry.get_group(version_group_id, include_versions=False)
+    if group is None and auto_group:
+        from src.intake.version_matcher import auto_match_group, normalise_filename
+        matched_id = auto_match_group(filename, project, registry)
+        if matched_id:
+            group = registry.get_group(matched_id, include_versions=False)
+    if group is None:
+        from src.intake.version_matcher import normalise_filename
+        base = normalise_filename(filename)
+        name = group_name or (base.title() if base else filename)
+        group = registry.create_or_find_group(name=name, base_filename=base or filename.lower(), project=project)
+
+    ver = registry.add_version(group["group_id"], doc_id, label=version_label, notes=version_notes)
+    registry.set_latest_version(group["group_id"], doc_id)
+    # ───────────────────────────────────────────────────────────────────
+
     doc = registry.get_document(doc_id)
-    return {**doc, "duplicate": False}
+    return {
+        **doc,
+        "duplicate": False,
+        "group_id": group["group_id"],
+        "version_id": ver["version_id"] if ver else None,
+        "version_label": ver["version_label"] if ver else None,
+        "version_number": ver["version_number"] if ver else None,
+    }
 
 
 def delete_document(
@@ -101,6 +138,42 @@ def delete_document(
         index_adapter_factory=index_adapter_factory,
         data_dir=data_dir,
     )
+
+
+def delete_document_version(
+    *,
+    group_id: str,
+    version_number: int,
+    registry: DocumentRegistry,
+    data_dir: Path,
+    index_adapter_factory,
+) -> dict:
+    """Remove a version from its group and delete the underlying document + artifacts.
+
+    Order: remove version row first, then delete document (so cleanup cannot leave
+    dangling version metadata if it cascades), then recompute the group's latest.
+    """
+    ver = registry.get_version(group_id, version_number)
+    if not ver:
+        return {"status": "not_found"}
+    doc_id = ver["doc_id"]
+    # Remove version row first
+    removed = registry.remove_version(group_id, version_number)
+    # Delete the underlying document and its artifacts
+    cleanup = remove_document(
+        doc_id,
+        registry,
+        index_adapter_factory=index_adapter_factory,
+        data_dir=data_dir,
+    )
+    # Recompute latest among remaining versions
+    latest = registry.recompute_latest_version(group_id)
+    return {
+        "status": "deleted",
+        "removed_version": removed,
+        "cleanup": cleanup,
+        "latest_version": latest,
+    }
 
 
 def artifact_path(doc_id: str, artifact_type: str, data_dir: Path) -> Path | None:

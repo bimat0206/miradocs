@@ -3,10 +3,11 @@
 import * as Tabs from "@radix-ui/react-tabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, CheckCircle2, Database, Eye, Lock, Tags } from "lucide-react";
+import { Activity, CheckCircle2, Database, Eye, Lock, Tags, GitCompare } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { LibraryPanel } from "./workspace/library-panel";
+import { VersionsView } from "./workspace/versions-view";
 
 import { WorkspaceHeader } from "./workspace/workspace-header";
 import { ProcessView } from "./workspace/process-view";
@@ -104,6 +105,18 @@ const workflowNav: Array<{
       icon: "group-data-[state=active]:border-violet-300/45 group-data-[state=active]:bg-violet-300/15 group-data-[state=active]:text-violet-100",
       text: "group-data-[state=active]:text-violet-100/80",
       hover: "group-hover:border-violet-300/30 group-hover:text-violet-100",
+    },
+  },
+  {
+    value: "Versions",
+    label: "Versions",
+    detail: "Compare versions",
+    Icon: GitCompare,
+    accent: {
+      active: "data-[state=active]:border-rose-300/60 data-[state=active]:bg-rose-300/10",
+      icon: "group-data-[state=active]:border-rose-300/45 group-data-[state=active]:bg-rose-300/15 group-data-[state=active]:text-rose-100",
+      text: "group-data-[state=active]:text-rose-100/80",
+      hover: "group-hover:border-rose-300/30 group-hover:text-rose-100",
     },
   },
 ];
@@ -449,7 +462,13 @@ export function Workspace() {
             selectedDocIds={selectedDocIds}
             setSelectedDocIds={setSelectedDocIds}
             fileInput={fileInput}
-            onUpload={(file) => uploadMutation.mutate(file)}
+            onUpload={() => {}}
+            onUploadComplete={(doc) => {
+              setSelectedDocId(doc.doc_id);
+              queryClient.invalidateQueries({ queryKey: ["documents"] });
+              queryClient.invalidateQueries({ queryKey: ["version-groups"] });
+              queryClient.invalidateQueries({ queryKey: ["version-group"] });
+            }}
             onSelect={setSelectedDocId}
             isUploading={uploadMutation.isPending}
             onDeleteMultiple={(docIds) => deleteMutation.mutate(docIds)}
@@ -458,7 +477,10 @@ export function Workspace() {
             onOpenAbout={openAbout}
             onOpenGuide={openGuide}
             onToggle={() => setSidebarOpen(false)}
-            onImportComplete={() => queryClient.invalidateQueries({ queryKey: ["documents"] })}
+            onImportComplete={() => {
+              queryClient.invalidateQueries({ queryKey: ["documents"] });
+              queryClient.invalidateQueries({ queryKey: ["version-groups"] });
+            }}
           />
         </div>
         <section className="relative rounded-[28px] glass gradient-border flex flex-col overflow-hidden lg:h-full min-h-[600px] lg:min-h-0">
@@ -635,7 +657,7 @@ export function Workspace() {
                       />
                     </Tabs.Content>
                     <Tabs.Content value="Inspect" className="h-full min-h-0">
-                      <InspectView doc={selectedDoc} page={page} setPage={setPage} />
+                      <InspectView doc={selectedDoc} page={page} setPage={setPage} onSelectDocId={setSelectedDocId} />
                     </Tabs.Content>
                     <Tabs.Content value="Index" className="h-full min-h-0">
                       <IndexView
@@ -652,6 +674,15 @@ export function Workspace() {
                         onSearch={() => selectedDoc && searchMutation.mutate()}
                         isSearching={searchMutation.isPending}
                         results={searchMutation.data?.results ?? []}
+                      />
+                    </Tabs.Content>
+                    <Tabs.Content value="Versions" className="h-full min-h-0">
+                      <VersionsView
+                        currentProject={selectedDoc?.project || "default"}
+                        onSelectDocument={(docId) => {
+                          setSelectedDocId(docId);
+                          setActiveTab("Inspect");
+                        }}
                       />
                     </Tabs.Content>
                   </motion.div>

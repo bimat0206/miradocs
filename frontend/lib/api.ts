@@ -12,9 +12,20 @@ import type {
   PipelineRun,
   PipelineStep,
   SearchResult,
+  DocumentGroup,
+  VersionSummary,
 } from "./types";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const getApiBase = () => {
+  if (typeof window !== "undefined") {
+    // On the client: dynamically target port 8000 on the current host
+    return `http://${window.location.hostname}:8000`;
+  }
+  // On the server (SSR): use NEXT_PUBLIC_API_URL or fallback to localhost
+  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+};
+
+export const API_BASE = getApiBase();
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -96,11 +107,16 @@ export function getIndexStatus(docId: string) {
   return request<IndexStatus>(`/api/documents/${docId}/index/status`);
 }
 
-export function search(docId: string | string[], query: string, topK = 5, options?: import("./types").SearchOptions) {
+export function search(
+  docId: string | string[] | null,
+  query: string,
+  topK = 5,
+  options?: import("./types").SearchOptions & { version_group_id?: string; version_number?: number }
+) {
   return request<{ results: SearchResult[] }>("/api/search", {
     method: "POST",
     body: JSON.stringify({
-      doc_id: docId,
+      doc_id: docId || undefined,
       query,
       top_k: topK,
       hybrid: options?.hybrid ?? true,
@@ -108,6 +124,8 @@ export function search(docId: string | string[], query: string, topK = 5, option
       dense_weight: options?.dense_weight ?? 0.7,
       sparse_weight: options?.sparse_weight ?? 0.3,
       search_mode: options?.search_mode,
+      version_group_id: options?.version_group_id,
+      version_number: options?.version_number,
     }),
   });
 }
@@ -213,4 +231,35 @@ export async function importWorkspace(file: File, merge = true): Promise<ImportR
     throw new Error(detail || response.statusText);
   }
   return response.json() as Promise<ImportResult>;
+}
+
+export function fetchGroups(project?: string): Promise<DocumentGroup[]> {
+  const url = project ? `/api/groups?project=${encodeURIComponent(project)}` : "/api/groups";
+  return request<{ groups: DocumentGroup[] }>(url).then(r => r.groups);
+}
+
+export function fetchGroup(groupId: string): Promise<DocumentGroup> {
+  return request<DocumentGroup>(`/api/groups/${groupId}`);
+}
+
+export function compareVersions(groupId: string, sourceVer: number, targetVer: number): Promise<CompareResult> {
+  return request<CompareResult>(`/api/groups/${groupId}/compare`, {
+    method: "POST",
+    body: JSON.stringify({ source_version: sourceVer, target_version: targetVer }),
+  });
+}
+
+export function deleteVersion(groupId: string, versionNumber: number): Promise<any> {
+  return request<any>(`/api/groups/${groupId}/versions/${versionNumber}`, {
+    method: "DELETE",
+  });
+}
+
+export function suggestGroup(filename: string, project = "default"): Promise<DocumentGroup | null> {
+  const url = `/api/groups/suggest?filename=${encodeURIComponent(filename)}&project=${encodeURIComponent(project)}`;
+  return request<{ group: DocumentGroup | null }>(url).then(r => r.group);
+}
+
+export function getDocumentVersion(docId: string): Promise<{ version: VersionSummary | null; group: DocumentGroup | null }> {
+  return request<{ version: VersionSummary | null; group: DocumentGroup | null }>(`/api/documents/${docId}/version`);
 }

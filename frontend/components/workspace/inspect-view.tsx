@@ -1,14 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FileSearch, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { FileSearch, ListTree, ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/ui/empty-state";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
 import { InsightPanel } from "@/components/ui/insight-panel";
 import { TablePreview } from "./table-preview";
-import { figureImageUrl, getArtifact, pageImageUrl } from "@/lib/api";
+import { figureImageUrl, getArtifact, pageImageUrl, getDocumentVersion } from "@/lib/api";
 import { statusLabel } from "@/lib/workflow";
 import type {
   DocumentRecord,
@@ -18,7 +18,14 @@ import type {
 
 type StructureArtifact = {
   pages?: Array<{ page: number; section_path?: string; tables?: string[]; figures?: string[] }>;
-  sections?: Array<{ section_id: string; title: string; page_start: number; page_end: number; level: number }>;
+  sections?: Array<{
+    section_id: string;
+    section_path?: string;
+    title: string;
+    page_start: number;
+    page_end: number;
+    level: number;
+  }>;
 };
 
 type QualityArtifact = {
@@ -32,17 +39,25 @@ interface InspectViewProps {
   doc: DocumentRecord | null;
   page: number;
   setPage: (page: number) => void;
+  onSelectDocId?: (docId: string) => void;
 }
 
-export function InspectView({ doc, page, setPage }: InspectViewProps) {
+export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewProps) {
   const [inspectMode, setInspectMode] = useState<"tables" | "figures">("tables");
   const [tableSearch, setTableSearch] = useState("");
   const [figureSearch, setFigureSearch] = useState("");
+  const [sectionSearch, setSectionSearch] = useState("");
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [selectedFigureId, setSelectedFigureId] = useState<string | null>(null);
   const [pageDraft, setPageDraft] = useState(String(page));
   const [largePageOpen, setLargePageOpen] = useState(false);
   const [pageImageMissing, setPageImageMissing] = useState(false);
+
+  const versionQuery = useQuery({
+    queryKey: ["document-version", doc?.doc_id],
+    queryFn: () => getDocumentVersion(doc!.doc_id),
+    enabled: Boolean(doc),
+  });
 
   const structureQuery = useQuery({
     queryKey: ["artifact", doc?.doc_id, "structure"],
@@ -75,6 +90,28 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
   );
   const tables = tablesQuery.data ?? [];
   const figures = figuresQuery.data ?? [];
+  const sections = structureQuery.data?.sections ?? [];
+  const currentSection = useMemo(() => {
+    const matches = sections.filter((section) => {
+      const start = section.page_start || 0;
+      const end = section.page_end || start;
+      return page >= start && page <= end;
+    });
+    return matches.sort((a, b) => (b.level || 0) - (a.level || 0))[0] ?? null;
+  }, [page, sections]);
+  const filteredSections = useMemo(() => {
+    const query = sectionSearch.trim().toLowerCase();
+    if (!query) return sections;
+    return sections.filter((section) => {
+      const haystack = [
+        section.title,
+        section.section_path,
+        `page ${section.page_start}`,
+        `p${section.page_start}`,
+      ].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [sectionSearch, sections]);
 
   const filteredTables = tables.filter((table) => {
     const query = tableSearch.toLowerCase();
@@ -129,7 +166,22 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
       {/* Evidence Viewer Container */}
       <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 flex flex-col lg:h-full lg:min-h-0 min-h-[400px]">
         <div className="mb-4 flex items-center justify-between shrink-0">
-          <h3 className="text-lg font-semibold">Evidence viewer</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold">Evidence viewer</h3>
+            {versionQuery.data?.group?.versions && versionQuery.data.group.versions.length > 1 && (
+              <select
+                value={doc.doc_id}
+                onChange={(e) => onSelectDocId?.(e.target.value)}
+                className="h-8 rounded-lg border border-white/10 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-cyan-300/60"
+              >
+                {versionQuery.data.group.versions.map((v) => (
+                  <option key={v.doc_id} value={v.doc_id}>
+                    {v.version_label} (v{v.version_number})
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               onClick={() => {
@@ -220,6 +272,86 @@ export function InspectView({ doc, page, setPage }: InspectViewProps) {
               ))}
           </div>
         </InsightPanel>
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <h3 className="flex items-center gap-2 text-lg font-semibold">
+                <ListTree size={18} className="text-cyan-200" />
+                Section tree
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {sections.length ? `${sections.length} sections parsed from ${totalPages} pages` : "No parsed sections available"}
+              </p>
+            </div>
+            {currentSection && (
+              <button
+                type="button"
+                onClick={() => setPage(Math.max(1, currentSection.page_start || 1))}
+                className="max-w-full rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-left text-xs text-cyan-100 transition hover:border-cyan-300/50 sm:max-w-[260px]"
+                title={currentSection.section_path || currentSection.title}
+              >
+                <span className="block text-[10px] uppercase tracking-[0.18em] text-cyan-200/70">Current</span>
+                <span className="block truncate font-medium">{currentSection.title}</span>
+              </button>
+            )}
+          </div>
+
+          <input
+            value={sectionSearch}
+            onChange={(event) => setSectionSearch(event.target.value)}
+            placeholder="Filter sections or pages"
+            className="mb-3 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-cyan-300/60"
+          />
+
+          {structureQuery.isLoading ? (
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400">
+              Loading parsed sections...
+            </div>
+          ) : filteredSections.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-4 text-sm text-slate-400">
+              {sections.length ? "No sections match the current filter." : "Run the parse step to generate document sections."}
+            </div>
+          ) : (
+            <div className="thin-scrollbar max-h-[280px] space-y-1 overflow-y-auto pr-1">
+              {filteredSections.map((section) => {
+                const start = Math.max(1, section.page_start || 1);
+                const end = Math.max(start, section.page_end || start);
+                const active = page >= start && page <= end;
+                const level = Math.min(Math.max(section.level || 1, 1), 5);
+                return (
+                  <button
+                    key={section.section_id}
+                    type="button"
+                    onClick={() => {
+                      setPage(start);
+                      setPageDraft(String(start));
+                    }}
+                    title={section.section_path || section.title}
+                    className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
+                      active
+                        ? "border-cyan-300/45 bg-cyan-300/10 text-cyan-50"
+                        : "border-transparent bg-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.04]"
+                    }`}
+                    style={{ paddingLeft: `${12 + (level - 1) * 14}px` }}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{section.title || "Untitled section"}</span>
+                      {section.section_path && section.section_path !== section.title && (
+                        <span className="mt-0.5 block truncate text-[11px] text-slate-500">{section.section_path}</span>
+                      )}
+                    </span>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      active ? "bg-cyan-300/15 text-cyan-100" : "bg-white/[0.05] text-slate-500"
+                    }`}>
+                      {start === end ? `p.${start}` : `p.${start}-${end}`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 flex flex-col min-h-0">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">

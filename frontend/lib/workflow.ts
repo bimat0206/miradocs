@@ -1,6 +1,6 @@
 import type { JobEvent, PipelineStep, PipelineSummary } from "./types";
 
-export const workflowTabs = ["Process", "Tags", "Inspect", "Index"] as const;
+export const workflowTabs = ["Process", "Tags", "Inspect", "Index", "Versions"] as const;
 export type WorkflowTab = (typeof workflowTabs)[number];
 
 export const stepLabels: Record<string, string> = {

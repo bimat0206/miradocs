@@ -99,6 +99,35 @@ CREATE TABLE IF NOT EXISTS compare_findings (
 
 CREATE INDEX IF NOT EXISTS idx_compare_findings_run_id ON compare_findings(run_id);
 
+CREATE TABLE IF NOT EXISTS document_groups (
+    group_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    base_filename TEXT NOT NULL,
+    project TEXT DEFAULT 'default',
+    notes TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(project, base_filename)
+);
+
+CREATE TABLE IF NOT EXISTS document_versions (
+    version_id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES document_groups(group_id) ON DELETE CASCADE,
+    doc_id TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
+    version_label TEXT NOT NULL,
+    version_number INTEGER NOT NULL,
+    is_latest INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(group_id, version_number),
+    UNIQUE(group_id, version_label),
+    UNIQUE(doc_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_groups_project ON document_groups(project);
+CREATE INDEX IF NOT EXISTS idx_document_versions_group_id ON document_versions(group_id);
+CREATE INDEX IF NOT EXISTS idx_document_versions_doc_id ON document_versions(doc_id);
+
 """
 
 PIPELINE_STEPS = [
@@ -135,6 +164,10 @@ class DocumentRegistry:
                 conn.execute("ALTER TABLE documents ADD COLUMN tags_json TEXT DEFAULT '[]'")
             if "page_count" not in columns:
                 conn.execute("ALTER TABLE documents ADD COLUMN page_count INTEGER DEFAULT NULL")
+            # Migration guard for document_groups.notes (added in v1.8)
+            group_cols = {row["name"] for row in conn.execute("PRAGMA table_info(document_groups)").fetchall()}
+            if group_cols and "notes" not in group_cols:
+                conn.execute("ALTER TABLE document_groups ADD COLUMN notes TEXT DEFAULT ''")
 
     def _row_to_document(self, row: sqlite3.Row) -> dict:
         doc = dict(row)
@@ -581,3 +614,233 @@ class DocumentRegistry:
                 "SELECT * FROM documents WHERE sha256 = ?", (sha256,)
             ).fetchone()
             return self._row_to_document(row) if row else None
+
+    # ─── Version Group helpers ────────────────────────────────────────────────
+
+    def _row_to_version(self, row: sqlite3.Row) -> dict:
+        """Convert a document_versions row (optionally joined with documents) to dict."""
+        v = dict(row)
+        v["is_latest"] = bool(v.get("is_latest", 0))
+        return v
+
+    def create_or_find_group(
+        self,
+        name: str,
+        base_filename: str,
+        project: str = "default",
+        notes: str = "",
+    ) -> dict:
+        """Return existing group for (project, base_filename) or create a new one."""
+        now = datetime.now(timezone.utc).isoformat()
+        group_id = uuid.uuid4().hex
+        with self._conn() as conn:
+            existing = conn.execute(
+                "SELECT * FROM document_groups WHERE project = ? AND base_filename = ?",
+                (project, base_filename),
+            ).fetchone()
+            if existing:
+                return dict(existing)
+            conn.execute(
+                """INSERT INTO document_groups
+                (group_id, name, base_filename, project, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (group_id, name, base_filename, project, notes, now, now),
+            )
+        return self.get_group(group_id, include_versions=False)
+
+    def update_group(
+        self,
+        group_id: str,
+        *,
+        name: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Update group name and/or notes. Returns updated group or None if not found."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            existing = conn.execute(
+                "SELECT * FROM document_groups WHERE group_id = ?", (group_id,)
+            ).fetchone()
+            if not existing:
+                return None
+            new_name = name if name is not None else existing["name"]
+            new_notes = notes if notes is not None else existing["notes"]
+            conn.execute(
+                "UPDATE document_groups SET name = ?, notes = ?, updated_at = ? WHERE group_id = ?",
+                (new_name, new_notes, now, group_id),
+            )
+        return self.get_group(group_id, include_versions=False)
+
+    def add_version(
+        self,
+        group_id: str,
+        doc_id: str,
+        label: Optional[str] = None,
+        notes: str = "",
+    ) -> dict:
+        """Add a document as a new version to a group. Auto-assigns version_number and label."""
+        now = datetime.now(timezone.utc).isoformat()
+        version_id = uuid.uuid4().hex
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(version_number), 0) AS mx FROM document_versions WHERE group_id = ?",
+                (group_id,),
+            ).fetchone()
+            next_num = (row["mx"] if row else 0) + 1
+            version_label = label if label else f"v{next_num}"
+            conn.execute(
+                """INSERT INTO document_versions
+                (version_id, group_id, doc_id, version_label, version_number, is_latest, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?)""",
+                (version_id, group_id, doc_id, version_label, next_num, notes, now),
+            )
+            # Update group updated_at
+            conn.execute(
+                "UPDATE document_groups SET updated_at = ? WHERE group_id = ?",
+                (now, group_id),
+            )
+        return self.get_version_for_doc(doc_id)
+
+    def set_latest_version(self, group_id: str, doc_id: str) -> None:
+        """Mark doc_id as the latest version in the group; clear is_latest on all others."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE document_versions SET is_latest = 0 WHERE group_id = ?",
+                (group_id,),
+            )
+            conn.execute(
+                "UPDATE document_versions SET is_latest = 1 WHERE group_id = ? AND doc_id = ?",
+                (group_id, doc_id),
+            )
+            conn.execute(
+                "UPDATE document_groups SET updated_at = ? WHERE group_id = ?",
+                (now, group_id),
+            )
+
+    def get_group(self, group_id: str, include_versions: bool = True) -> Optional[dict]:
+        """Return group dict (optionally with nested versions list)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM document_groups WHERE group_id = ?", (group_id,)
+            ).fetchone()
+            if not row:
+                return None
+            group = dict(row)
+        if include_versions:
+            group["versions"] = self.get_versions_for_group(group_id)
+        return group
+
+    def get_group_for_doc(self, doc_id: str) -> Optional[dict]:
+        """Return the group that contains doc_id, or None."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """SELECT g.* FROM document_groups g
+                   JOIN document_versions v ON v.group_id = g.group_id
+                   WHERE v.doc_id = ?""",
+                (doc_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def list_groups(self, project: Optional[str] = None) -> list[dict]:
+        """List all groups, optionally filtered by project, with version count and latest info."""
+        with self._conn() as conn:
+            if project:
+                rows = conn.execute(
+                    "SELECT * FROM document_groups WHERE project = ? ORDER BY updated_at DESC",
+                    (project,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM document_groups ORDER BY updated_at DESC"
+                ).fetchall()
+        result = []
+        for row in rows:
+            group = dict(row)
+            versions = self.get_versions_for_group(group["group_id"])
+            group["version_count"] = len(versions)
+            latest = next((v for v in versions if v["is_latest"]), None)
+            group["latest_doc_id"] = latest["doc_id"] if latest else None
+            group["latest_label"] = latest["version_label"] if latest else None
+            result.append(group)
+        return result
+
+    def get_versions_for_group(self, group_id: str) -> list[dict]:
+        """Return all versions for a group ordered by version_number ASC, joined with doc info."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT v.*, d.filename, d.status, d.upload_time, d.page_count
+                   FROM document_versions v
+                   LEFT JOIN documents d ON d.doc_id = v.doc_id
+                   WHERE v.group_id = ?
+                   ORDER BY v.version_number ASC""",
+                (group_id,),
+            ).fetchall()
+        return [self._row_to_version(r) for r in rows]
+
+    def get_version(self, group_id: str, version_number: int) -> Optional[dict]:
+        """Return a single version row joined with doc info, or None."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """SELECT v.*, d.filename, d.status, d.upload_time, d.page_count
+                   FROM document_versions v
+                   LEFT JOIN documents d ON d.doc_id = v.doc_id
+                   WHERE v.group_id = ? AND v.version_number = ?""",
+                (group_id, version_number),
+            ).fetchone()
+        return self._row_to_version(row) if row else None
+
+    def get_version_for_doc(self, doc_id: str) -> Optional[dict]:
+        """Return the version row for a given doc_id (joined with doc info), or None."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """SELECT v.*, d.filename, d.status, d.upload_time, d.page_count
+                   FROM document_versions v
+                   LEFT JOIN documents d ON d.doc_id = v.doc_id
+                   WHERE v.doc_id = ?""",
+                (doc_id,),
+            ).fetchone()
+        return self._row_to_version(row) if row else None
+
+    def remove_version(self, group_id: str, version_number: int) -> Optional[dict]:
+        """Delete a document_versions row and return its metadata. Does NOT delete the document."""
+        ver = self.get_version(group_id, version_number)
+        if not ver:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM document_versions WHERE group_id = ? AND version_number = ?",
+                (group_id, version_number),
+            )
+            conn.execute(
+                "UPDATE document_groups SET updated_at = ? WHERE group_id = ?",
+                (now, group_id),
+            )
+        return ver
+
+    def recompute_latest_version(self, group_id: str) -> Optional[dict]:
+        """Mark the highest remaining version_number as latest and return it (or None if empty)."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE document_versions SET is_latest = 0 WHERE group_id = ?",
+                (group_id,),
+            )
+            top = conn.execute(
+                """SELECT version_number FROM document_versions
+                   WHERE group_id = ? ORDER BY version_number DESC LIMIT 1""",
+                (group_id,),
+            ).fetchone()
+            if not top:
+                return None
+            conn.execute(
+                """UPDATE document_versions SET is_latest = 1
+                   WHERE group_id = ? AND version_number = ?""",
+                (group_id, top["version_number"]),
+            )
+            conn.execute(
+                "UPDATE document_groups SET updated_at = ? WHERE group_id = ?",
+                (now, group_id),
+            )
+        return self.get_version(group_id, top["version_number"])

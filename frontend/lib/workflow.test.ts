@@ -126,6 +126,6 @@ describe("workflow helpers", () => {
   });
 
   it("defines the operator workspace tabs", () => {
-    expect(workflowTabs).toEqual(["Process", "Tags", "Inspect", "Index"]);
+    expect(workflowTabs).toEqual(["Process", "Tags", "Inspect", "Index", "Versions"]);
   });
 });

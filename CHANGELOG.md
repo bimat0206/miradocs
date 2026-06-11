@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.8.0 - 2026-06-11
+
+### Added
+- **Document version history**: uploaded and imported documents can now be grouped into version histories with labels, notes, latest-version tracking, and duplicate upload detection.
+- **Unified version workflow**: the workspace adds a Versions tab for browsing groups, switching between versions, selecting two versions, and launching semantic version diffs.
+- **Version-aware APIs and MCP tools**: REST and MCP surfaces now expose version groups, per-document version lookup, semantic version comparison, and version-scoped retrieval filters.
+- **Inline Inspect version switching**: the Inspect view can switch between document versions without leaving the current evidence workflow.
+- **Visible section tree**: Inspect now shows parsed document sections with filtering, current-section highlighting, and click-to-jump page navigation.
+
+### Changed
+- **Version upload controls**: the library upload flow can attach new files to an existing version group and surface duplicate-version context.
+- **Search result enrichment**: retrieval results can include version labels and version numbers when documents belong to a version group.
+
+### Fixed
+- **Uploaded version cleanup**: deleting a version removes the version row, deletes the underlying document artifacts, and recomputes the latest remaining version.
+
+---
+
 ## v1.7.2 - 2026-06-10
 
 ### Fixed

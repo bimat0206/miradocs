@@ -19,6 +19,7 @@ from src.mcp.schemas import (
     GetEntityRelationshipsInput, GetEntityRelationshipsOutput, EntityRelationship,
     ExportWorkspaceInput, ExportWorkspaceOutput,
     ImportWorkspaceInput, ImportWorkspaceOutput,
+    ListVersionGroupsInput, GetVersionGroupInput, GetVersionForDocInput, CompareVersionsInput,
 )
 from src.retrieval.retrieval_service import RetrievalService
 
@@ -67,6 +68,10 @@ def search_docs(params: SearchDocsInput) -> SearchDocsOutput:
         filters["document_type"] = params.document_type
     if params.chunk_types:
         filters["chunk_types"] = params.chunk_types
+    if params.version_group_id:
+        filters["version_group_id"] = params.version_group_id
+    if params.version_number is not None:
+        filters["version_number"] = params.version_number
 
     return get_retrieval_service().search_docs(
         query=params.query, top_k=params.top_k,
@@ -642,3 +647,57 @@ def _find_raw_file(doc_id: str) -> Path | None:
         files = list(raw_dir.iterdir())
         return files[0] if files else None
     return None
+
+
+# ─── version tools ──────────────────────────────────────────────────────────────────
+
+def list_version_groups(params: ListVersionGroupsInput) -> dict:
+    """List all document version groups with version counts and latest info."""
+    logger.info("list_version_groups: project=%s, doc_id=%s", params.project, params.doc_id)
+    registry = _get_registry()
+    if params.doc_id:
+        group = registry.get_group_for_doc(params.doc_id)
+        groups = [group] if group else []
+    else:
+        groups = registry.list_groups(project=params.project)
+    return {"count": len(groups), "groups": groups}
+
+
+def get_version_group(params: GetVersionGroupInput) -> dict:
+    """Get detailed version history for a document group."""
+    logger.info("get_version_group: group_id=%s", params.group_id)
+    registry = _get_registry()
+    group = registry.get_group(params.group_id, include_versions=True)
+    if not group:
+        return {"error": f"Group {params.group_id} not found"}
+    return group
+
+
+def get_version_for_doc(params: GetVersionForDocInput) -> dict:
+    """Find which group and version a given document belongs to."""
+    logger.info("get_version_for_doc: doc_id=%s", params.doc_id)
+    registry = _get_registry()
+    version = registry.get_version_for_doc(params.doc_id)
+    group = registry.get_group_for_doc(params.doc_id)
+    if not version:
+        return {"error": f"Document {params.doc_id} is not part of any version group"}
+    return {"version": version, "group": group}
+
+
+def compare_versions(params: CompareVersionsInput) -> dict:
+    """Run a semantic version diff between two versions of a document group."""
+    logger.info(
+        "compare_versions: group_id=%s src_ver=%d tgt_ver=%d",
+        params.group_id, params.source_version, params.target_version,
+    )
+    from src.services.version_diff_service import compare_versions as _compare, VersionDiffError
+    try:
+        return _compare(
+            group_id=params.group_id,
+            source_version=params.source_version,
+            target_version=params.target_version,
+            registry=_get_registry(),
+            data_dir=get_data_dir(),
+        )
+    except VersionDiffError as exc:
+        return {"error": str(exc)}
