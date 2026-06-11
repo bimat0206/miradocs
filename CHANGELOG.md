@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.8.1 - 2026-06-11
+
+### Fixed
+- **Inspect panel readability**: the Inspect layout now keeps the section tree, tables, and figures readable with bounded panels and independent scrolling.
+- **Collapsed quality summary**: the Quality panel is collapsed by default and shows the current status in the title to preserve vertical space.
+
+---
+
 ## v1.8.0 - 2026-06-11
 
 ### Added

@@ -1,12 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FileSearch, ListTree, ShieldCheck } from "lucide-react";
+import { ChevronDown, ChevronRight, FileSearch, ListTree, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/ui/empty-state";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
-import { InsightPanel } from "@/components/ui/insight-panel";
 import { TablePreview } from "./table-preview";
 import { figureImageUrl, getArtifact, pageImageUrl, getDocumentVersion } from "@/lib/api";
 import { statusLabel } from "@/lib/workflow";
@@ -52,6 +51,7 @@ export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewPr
   const [pageDraft, setPageDraft] = useState(String(page));
   const [largePageOpen, setLargePageOpen] = useState(false);
   const [pageImageMissing, setPageImageMissing] = useState(false);
+  const [qualityOpen, setQualityOpen] = useState(false);
 
   const versionQuery = useQuery({
     queryKey: ["document-version", doc?.doc_id],
@@ -91,6 +91,7 @@ export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewPr
   const tables = tablesQuery.data ?? [];
   const figures = figuresQuery.data ?? [];
   const sections = structureQuery.data?.sections ?? [];
+  const qualityStatus = qualityQuery.data?.status ? statusLabel(qualityQuery.data.status) : "not available";
   const currentSection = useMemo(() => {
     const matches = sections.filter((section) => {
       const start = section.page_start || 0;
@@ -162,7 +163,7 @@ export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewPr
   };
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr] lg:h-full lg:min-h-0 min-h-[600px]">
+    <div className="grid gap-5 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:h-full lg:min-h-0 lg:overflow-hidden min-h-[600px]">
       {/* Evidence Viewer Container */}
       <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 flex flex-col lg:h-full lg:min-h-0 min-h-[400px]">
         <div className="mb-4 flex items-center justify-between shrink-0">
@@ -254,29 +255,48 @@ export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewPr
       </section>
 
       {/* Details & Extracted Items Container */}
-      <section className="flex flex-col gap-5 lg:h-full lg:min-h-0 overflow-y-auto">
-        <InsightPanel icon={<ShieldCheck size={18} />} title="Quality">
-          <p className="mb-3 text-sm text-slate-400">
-            Status: <span className="text-cyan-200">{qualityQuery.data?.status ? statusLabel(qualityQuery.data.status) : "not available"}</span>
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            {Object.entries(qualityQuery.data?.summary ?? {})
-              .slice(0, 6)
-              .map(([key, value]) => (
-                <div key={key} className="rounded-2xl bg-white/[0.04] p-3">
-                  <p className="text-xs text-slate-500">{key}</p>
-                  <p className="text-lg font-semibold">
-                    {Array.isArray(value) ? value.length : String(value)}
-                  </p>
-                </div>
-              ))}
-          </div>
-        </InsightPanel>
+      <section className="thin-scrollbar flex flex-col gap-4 lg:h-full lg:min-h-0 overflow-y-auto pr-1">
+        <section className="shrink-0 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+          <button
+            type="button"
+            onClick={() => setQualityOpen((open) => !open)}
+            className="flex w-full items-center justify-between gap-3 text-left"
+            aria-expanded={qualityOpen}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <ShieldCheck size={18} className="shrink-0 text-cyan-200" />
+              <span className="font-semibold">Quality</span>
+              <span className="truncate text-sm text-slate-500">Status:</span>
+              <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2 py-0.5 text-xs font-medium text-cyan-100">
+                {qualityStatus}
+              </span>
+            </span>
+            {qualityOpen ? (
+              <ChevronDown size={16} className="shrink-0 text-slate-500" />
+            ) : (
+              <ChevronRight size={16} className="shrink-0 text-slate-500" />
+            )}
+          </button>
+          {qualityOpen && (
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              {Object.entries(qualityQuery.data?.summary ?? {})
+                .slice(0, 6)
+                .map(([key, value]) => (
+                  <div key={key} className="rounded-2xl bg-white/[0.04] p-3">
+                    <p className="text-xs text-slate-500">{key}</p>
+                    <p className="text-lg font-semibold">
+                      {Array.isArray(value) ? value.length : String(value)}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          )}
+        </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <section className="shrink-0 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <h3 className="flex items-center gap-2 text-lg font-semibold">
+              <h3 className="flex items-center gap-2 text-base font-semibold">
                 <ListTree size={18} className="text-cyan-200" />
                 Section tree
               </h3>
@@ -313,7 +333,7 @@ export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewPr
               {sections.length ? "No sections match the current filter." : "Run the parse step to generate document sections."}
             </div>
           ) : (
-            <div className="thin-scrollbar max-h-[280px] space-y-1 overflow-y-auto pr-1">
+            <div className="thin-scrollbar max-h-[170px] space-y-1 overflow-y-auto pr-1 2xl:max-h-[220px]">
               {filteredSections.map((section) => {
                 const start = Math.max(1, section.page_start || 1);
                 const end = Math.max(start, section.page_end || start);
@@ -353,7 +373,7 @@ export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewPr
           )}
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 flex flex-col min-h-0">
+        <section className="flex h-[520px] min-h-[460px] shrink-0 flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035] p-5">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
             <h3 className="flex items-center gap-2 text-lg font-semibold">
               <FileSearch size={18} /> Tables & figures
@@ -376,15 +396,15 @@ export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewPr
           </div>
 
           {inspectMode === "tables" ? (
-            <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr] min-h-0">
-              <div className="flex flex-col min-h-0">
+            <div className="grid flex-1 gap-4 2xl:grid-cols-[0.8fr_1.2fr] min-h-0">
+              <div className="flex min-h-[220px] flex-col lg:min-h-0">
                 <input
                   value={tableSearch}
                   onChange={(event) => setTableSearch(event.target.value)}
                   placeholder="Filter by page, id, status"
                   className="mb-3 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-cyan-300/60 shrink-0"
                 />
-                <div className="thin-scrollbar space-y-2 overflow-y-auto max-h-[300px] lg:max-h-[260px] pr-1">
+                <div className="thin-scrollbar flex-1 space-y-2 overflow-y-auto pr-1">
                   {filteredTables.map((table) => (
                     <button
                       key={table.table_id}
@@ -412,14 +432,14 @@ export function InspectView({ doc, page, setPage, onSelectDocId }: InspectViewPr
               <TablePreview docId={doc.doc_id} table={selectedTable} />
             </div>
           ) : (
-            <div className="flex flex-col min-h-0">
+            <div className="flex min-h-0 flex-1 flex-col">
               <input
                 value={figureSearch}
                 onChange={(event) => setFigureSearch(event.target.value)}
                 placeholder="Filter by page, id, caption"
                 className="mb-3 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-cyan-300/60 shrink-0"
               />
-              <div className="thin-scrollbar grid gap-3 overflow-y-auto md:grid-cols-2 max-h-[480px] lg:max-h-[340px] pr-1">
+              <div className="thin-scrollbar grid flex-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2">
                 {filteredFigures.map((figure) => (
                   <button
                     key={figure.figure_id}
