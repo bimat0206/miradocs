@@ -1,6 +1,7 @@
 """Qdrant indexing adapter with Ollama BGE-M3 embeddings."""
 import hashlib
 import logging
+from pathlib import Path
 import threading
 from typing import Any
 
@@ -14,12 +15,27 @@ from src.config import get_config, get_data_dir
 from src.indexing.index_adapter import IndexAdapter
 
 logger = logging.getLogger(__name__)
+_ROOT = Path(__file__).resolve().parents[2]
 
 # Module-level singleton client — Qdrant local uses an exclusive file lock per
 # process. All QdrantAdapter instances within the same process must share one
 # QdrantClient to avoid "already accessed by another instance" errors.
 _client: QdrantClient | None = None
 _client_lock = threading.Lock()
+
+
+class QdrantStorageLockedError(RuntimeError):
+    """Raised when embedded Qdrant local storage is already locked."""
+
+
+def _resolve_qdrant_path(cfg: dict[str, Any]) -> str:
+    configured_path = cfg.get("indexing", {}).get("qdrant_path")
+    if configured_path:
+        path = Path(configured_path)
+        if not path.is_absolute():
+            path = _ROOT / path
+        return str(path)
+    return str(get_data_dir() / "indexes" / "qdrant")
 
 
 def _get_client(qdrant_path: str, qdrant_url: str | None = None) -> QdrantClient:
@@ -31,7 +47,20 @@ def _get_client(qdrant_path: str, qdrant_url: str | None = None) -> QdrantClient
                     logger.info("Connecting to Qdrant server at %s", qdrant_url)
                     _client = QdrantClient(url=qdrant_url)
                 else:
-                    _client = QdrantClient(path=qdrant_path)
+                    try:
+                        _client = QdrantClient(
+                            path=qdrant_path,
+                            force_disable_check_same_thread=True,
+                        )
+                    except RuntimeError as e:
+                        if "already accessed by another instance of Qdrant client" in str(e):
+                            raise QdrantStorageLockedError(
+                                f"Local Qdrant storage is locked at {qdrant_path}. "
+                                "Stop the other MiraDocs/API/MCP process that is using it, "
+                                "or configure indexing.qdrant_url to use a Qdrant server for "
+                                "concurrent access."
+                            ) from e
+                        raise
     return _client
 
 
@@ -43,8 +72,8 @@ class QdrantAdapter(IndexAdapter):
         self.ollama_url = cfg["embedding"]["ollama_url"]
         self.embed_model = cfg["embedding"]["model"]
 
-        qdrant_path = str(get_data_dir() / "indexes" / "qdrant")
         qdrant_url = cfg["indexing"].get("qdrant_url") or None
+        qdrant_path = _resolve_qdrant_path(cfg)
         self.client = _get_client(qdrant_path, qdrant_url)
         # Shared HTTP client — reuses TCP connections across all embed calls.
         self._http = httpx.Client(timeout=120.0)

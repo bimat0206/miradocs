@@ -19,6 +19,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urljoin
 
 
 class Style:
@@ -51,6 +52,7 @@ class Launcher:
         self.web_proc: subprocess.Popen[bytes] | None = None
         self.errors = 0
         self.warnings = 0
+        self._settings: dict | None = None
 
     def ok(self, message: str) -> None:
         print(f"{Style.GREEN}  ✔  {message}{Style.RESET}", flush=True)
@@ -117,6 +119,43 @@ class Launcher:
             return (self.root / "VERSION").read_text(encoding="utf-8").strip()
         except FileNotFoundError:
             return "unknown"
+
+    def settings(self) -> dict:
+        if self._settings is not None:
+            return self._settings
+        config_path = self.root / "config" / "settings.yaml"
+        if not config_path.exists():
+            self._settings = {}
+            return self._settings
+        try:
+            import yaml
+
+            with open(config_path, encoding="utf-8") as fh:
+                self._settings = yaml.safe_load(fh) or {}
+        except Exception as exc:
+            self.warn(f"Could not read config/settings.yaml: {exc}")
+            self.warnings += 1
+            self._settings = {}
+        return self._settings
+
+    def embedding_config(self) -> dict:
+        return self.settings().get("embedding", {})
+
+    def indexing_config(self) -> dict:
+        return self.settings().get("indexing", {})
+
+    def configured_ollama_url(self) -> str:
+        return self.embedding_config().get("ollama_url") or self.OLLAMA_URL
+
+    def configured_qdrant_url(self) -> str | None:
+        return self.indexing_config().get("qdrant_url") or None
+
+    def configured_qdrant_path(self) -> Path:
+        configured_path = self.indexing_config().get("qdrant_path")
+        if not configured_path:
+            return self.QDRANT_DATA_DIR
+        path = Path(configured_path)
+        return path if path.is_absolute() else path
 
     def github_repo_from_origin(self) -> str | None:
         result = self.run_text(["git", "remote", "get-url", "origin"], timeout=5)
@@ -284,10 +323,11 @@ class Launcher:
 
     def check_local_services(self) -> None:
         self.header("Local Services")
+        ollama_url = self.configured_ollama_url()
         try:
-            with urllib.request.urlopen(f"{self.OLLAMA_URL}/api/tags", timeout=3) as resp:
+            with urllib.request.urlopen(f"{ollama_url}/api/tags", timeout=3) as resp:
                 body = resp.read().decode(errors="replace")
-            self.ok(f"Ollama reachable at {self.OLLAMA_URL}")
+            self.ok(f"Ollama reachable at {ollama_url}")
             if "bge-m3" in body:
                 self.ok("Model bge-m3 is available")
             else:
@@ -297,8 +337,23 @@ class Launcher:
             self.warn("Ollama not responding; indexing/search embeddings will be degraded")
             self.warnings += 1
 
-        (self.root / self.QDRANT_DATA_DIR).mkdir(parents=True, exist_ok=True)
-        self.ok(f"Qdrant path ready: {self.QDRANT_DATA_DIR}")
+        qdrant_url = self.configured_qdrant_url()
+        if qdrant_url:
+            try:
+                collections_url = urljoin(qdrant_url.rstrip("/") + "/", "collections")
+                with urllib.request.urlopen(collections_url, timeout=3):
+                    pass
+                self.ok(f"Qdrant server reachable at {qdrant_url}")
+            except Exception:
+                self.warn(
+                    f"Qdrant server not responding at {qdrant_url}; "
+                    "start it with `docker compose up -d qdrant` or switch back to indexing.qdrant_path"
+                )
+                self.warnings += 1
+        else:
+            qdrant_path = self.configured_qdrant_path()
+            (self.root / qdrant_path).mkdir(parents=True, exist_ok=True)
+            self.ok(f"Qdrant path ready: {qdrant_path}")
 
         db_path = self.root / self.SQLITE_DB
         db_path.parent.mkdir(parents=True, exist_ok=True)
