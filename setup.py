@@ -240,8 +240,9 @@ import yaml  # noqa: E402 (available from system python or just-installed venv)
 
 config_path = ROOT / "config" / "settings.yaml"
 models: set[str] = set()
+cfg: dict = {}
 if config_path.exists():
-    cfg = yaml.safe_load(config_path.read_text())
+    cfg = yaml.safe_load(config_path.read_text()) or {}
     for section in cfg.values():
         if isinstance(section, dict):
             for key in ("model", "ollama_model", "rerank_model"):
@@ -274,13 +275,52 @@ for model in sorted(models):
         warn(f"Failed to pull {model} — run manually: ollama pull {model}")
         warnings += 1
 
-# ── 10. Data Directories ─────────────────────────────────────────────────────
+# ── 10. Qdrant Server ────────────────────────────────────────────────────────
+header("Qdrant Server")
+qdrant_url = (cfg.get("indexing") or {}).get("qdrant_url")
+
+def qdrant_running() -> bool:
+    if not qdrant_url:
+        return False
+    try:
+        urllib.request.urlopen(f"{qdrant_url.rstrip('/')}/collections", timeout=3)
+        return True
+    except Exception:
+        return False
+
+if qdrant_url:
+    if qdrant_running():
+        ok(f"Qdrant server already running at {qdrant_url}")
+    elif has_cmd("docker"):
+        info("Starting Qdrant via docker compose …")
+        result = subprocess.run(["docker", "compose", "up", "-d", "qdrant"], cwd=str(ROOT))
+        if result.returncode == 0:
+            for _ in range(20):
+                time.sleep(1)
+                if qdrant_running():
+                    break
+        if qdrant_running():
+            ok(f"Qdrant server started at {qdrant_url}")
+            installed.append("qdrant")
+        else:
+            warn(f"Qdrant did not respond at {qdrant_url} — run manually: docker compose up -d qdrant")
+            warnings += 1
+    else:
+        warn("Docker not found — install Docker or switch config/settings.yaml to embedded qdrant_path mode")
+        warnings += 1
+else:
+    ok("Using embedded Qdrant local path mode")
+
+# ── 11. Data Directories ─────────────────────────────────────────────────────
 header("Data Directories")
-for d in ("raw", "parsed", "converted", "page_images", "tables", "figures", "reports", "indexes/qdrant"):
+data_dirs = ["raw", "parsed", "converted", "page_images", "tables", "figures", "reports"]
+if not qdrant_url:
+    data_dirs.append("indexes/qdrant")
+for d in data_dirs:
     (ROOT / "data" / d).mkdir(parents=True, exist_ok=True)
 ok("All data directories ready")
 
-# ── 11. SQLite Registry ──────────────────────────────────────────────────────
+# ── 12. SQLite Registry ──────────────────────────────────────────────────────
 header("SQLite Registry")
 db_path = ROOT / "data" / "registry.db"
 try:
@@ -292,7 +332,7 @@ except Exception:
     warn("SQLite check failed — app will init schema on first start")
     warnings += 1
 
-# ── 12. MCP Server Importability ─────────────────────────────────────────────
+# ── 13. MCP Server Importability ─────────────────────────────────────────────
 header("MCP Server")
 r = run([venv_python, "-c", "import src.mcp.server"])
 if r.returncode == 0:
@@ -301,7 +341,7 @@ else:
     warn("src.mcp.server failed to import")
     warnings += 1
 
-# ── 13. Summary ──────────────────────────────────────────────────────────────
+# ── 14. Summary ──────────────────────────────────────────────────────────────
 print(_c("1;36", "\n══════════════════════════════════════════"))
 print(_c("1", "  Setup Summary"))
 print(_c("1;36", "══════════════════════════════════════════"))

@@ -121,8 +121,15 @@ Once running:
 | Workspace UI | http://localhost:3000 |
 | API | http://localhost:8000 |
 | API docs (Swagger) | http://localhost:8000/docs |
+| Qdrant | http://localhost:6333 |
 
 Press `Ctrl+C` to stop all services cleanly.
+
+MiraDocs uses Qdrant server mode by default so the API and MCP server can run at the same time without local vector-index file locks. Start Qdrant before indexing or semantic search:
+
+```bash
+docker compose up -d qdrant
+```
 
 ---
 
@@ -147,6 +154,8 @@ python3 cleanup.py --full       # everything
 
 Move your entire workspace — documents, parsed artifacts, and vector index — to another machine without re-running the pipeline.
 
+Qdrant server mode stores vectors in the running Qdrant service, not under `data/indexes/`. Workspace exports include documents, parsed artifacts, and registry state, plus manifest metadata that identifies the external vector backend. Back up Qdrant separately or re-index documents after import.
+
 ### Export
 
 Click **Export all** in the library sidebar to download a ZIP of everything. To export specific documents, select them first — the button changes to **Export (N)**.
@@ -156,7 +165,7 @@ The ZIP contains:
 - `data/raw/` — original uploaded files
 - `data/parsed/` — parsed artifacts (chunks, entities, relations, structure, quality reports)
 - `data/converted/`, `data/page_images/`, `data/tables/`, `data/figures/` — derived Office PDFs, rendered pages, and extracted assets
-- `data/indexes/` — local Qdrant vector index (embeddings included, no re-indexing needed)
+- `data/indexes/` — local Qdrant vector index only when embedded local mode is enabled
 - `miradocs_export.json` — manifest with version, timestamp, and doc list
 
 You can also trigger export directly from the API:
@@ -378,8 +387,9 @@ embedding:
 # -- Vector Index ─────────────────────────────────────────────
 indexing:
   default_store: "qdrant"
-  qdrant_path: "data/indexes/qdrant"
   collection_name: "architecture_docs"
+  qdrant_url: "http://localhost:6333"   # default server mode for API + MCP concurrency
+  # qdrant_path: "data/indexes/qdrant"  # embedded local fallback; not safe for concurrent processes
 
 # -- Chunking ─────────────────────────────────────────────────
 chunking:
@@ -424,7 +434,7 @@ graph:
 | More graph-expanded chunks | `graph.max_expanded_chunks: 10` |
 | LLM-extracted graph relations | `graph.use_llm_relations: true` |
 
-> After changing embedding model or chunking settings, delete `data/indexes/qdrant/` and re-index your documents.
+> After changing embedding model or chunking settings, recreate the Qdrant collection or re-index your documents. In embedded local fallback mode, delete `data/indexes/qdrant/` before re-indexing.
 
 ---
 
@@ -523,8 +533,9 @@ All running instances will see the update popup on next page load.
 | `docling` import fails | `pip install docling` (requires PyTorch — takes a few minutes) |
 | Ollama not responding | Run `ollama serve` in a separate terminal |
 | `bge-m3` not found | `ollama pull bge-m3` |
+| Qdrant server not responding | Run `docker compose up -d qdrant` from the project root |
 | Page images missing | `pip install PyMuPDF` |
-| Qdrant errors after config change | Delete `data/indexes/qdrant/` and re-index |
+| Qdrant errors after config change | Recreate the Qdrant collection and re-index; for embedded local fallback, delete `data/indexes/qdrant/` |
 | MCP server not found by client | Check `cwd` in your client config points to the project root |
 | No search results | Ensure documents are indexed — run Index from the workspace UI first |
 | Windows MCP path error | Use `.venv\Scripts\python.exe` and backslashes in `cwd` |

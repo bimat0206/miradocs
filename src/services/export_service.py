@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from src.config import get_data_dir, get_db_path
+from src.config import get_config, get_data_dir, get_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,28 @@ def _build_manifest(db_path: Path, doc_ids: list[str] | None) -> dict:
         "doc_count": len(doc_list),
         "doc_ids": doc_list,
         "type": "full",
+        "vector_index": _vector_index_manifest(),
+    }
+
+
+def _vector_index_manifest() -> dict:
+    indexing = get_config().get("indexing", {})
+    store = indexing.get("default_store", "qdrant")
+    collection_name = indexing.get("collection_name")
+    if indexing.get("qdrant_url"):
+        return {
+            "store": store,
+            "mode": "server",
+            "collection_name": collection_name,
+            "included": False,
+            "restore_note": "Vectors live in the configured Qdrant server and must be backed up or re-indexed separately.",
+        }
+    return {
+        "store": store,
+        "mode": "local",
+        "collection_name": collection_name,
+        "included": True,
+        "path": f"data/{_INDEX_DIR}",
     }
 
 

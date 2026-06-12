@@ -29,11 +29,10 @@ embedding:
 
 indexing:
   default_store: "qdrant"
-  qdrant_path: "data/indexes/qdrant"
   collection_name: "architecture_docs"
-  # qdrant_url: "http://localhost:6333"   # Uncomment to use Qdrant server instead of
-                                          # local file mode. Required when the API server
-                                          # and MCP server run as separate processes.
+  qdrant_url: "http://localhost:6333"   # Qdrant server mode; supports API + MCP concurrency.
+  # qdrant_path: "data/indexes/qdrant"  # Embedded local fallback. Do not use when the
+                                        # API server and MCP server run as separate processes.
 
 chunking:
   max_chunk_tokens: 512

@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.8.3 - 2026-06-12
+
+### Added
+- **Qdrant server default**: MiraDocs now defaults to Qdrant server mode at `http://localhost:6333`, allowing the API and MCP server to run concurrently without embedded local index file locks.
+- **Qdrant Compose service**: added a Docker Compose Qdrant service with persistent storage for local development.
+
+### Changed
+- **Startup and setup integration**: launcher and setup checks now read `config/settings.yaml`, validate the configured Qdrant server, and only prepare embedded local index paths when local fallback mode is configured.
+- **Workspace export metadata**: exports now record whether the vector index is local or server-backed so restore expectations are explicit.
+
+### Fixed
+- **Embedded Qdrant lock guidance**: local fallback mode now raises a clearer remediation message when the embedded index is already locked by another process.
+
+---
+
 ## v1.8.2 - 2026-06-11
 
 ### Fixed
