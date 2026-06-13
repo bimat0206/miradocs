@@ -268,7 +268,17 @@ class Launcher:
         self.check_mcp()
         self.print_health_summary()
         if self.errors:
+            self.fail("Cannot start — resolve the errors above or run: python3 setup.py")
             return 1
+        if self.warnings:
+            print(f"\n{Style.BOLD}  Start anyway with degraded functionality? [y/N] {Style.RESET}", end="", flush=True)
+            try:
+                answer = input().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            if answer not in ("y", "yes"):
+                self.info("Aborted. Fix the issues above or run: python3 setup.py")
+                return 1
         self.launch_services()
         return self.monitor_services()
 
@@ -284,7 +294,7 @@ class Launcher:
         node = shutil.which("node")
         npm = shutil.which("npm")
         if not node or not npm:
-            self.fail("Node.js and npm are required for the Next.js UI")
+            self.fail("Node.js and npm are required — run: python3 setup.py")
             self.errors += 1
             return
         self.ok(f"Node {self.run_text([node, '--version']).stdout.strip()}")
@@ -306,18 +316,16 @@ class Launcher:
             if result.returncode == 0:
                 self.ok(package)
             else:
-                self.warn(f"{package} not installed")
                 missing.append(package)
         if missing:
-            self.info("Installing Python dependencies from requirements.txt …")
-            self.run([str(self.venv_pip), "install", "-q", "-r", "requirements.txt"], check=True)
-            self.ok("Python dependencies installed")
+            self.fail(f"Missing Python packages: {', '.join(missing)} — run: python3 setup.py")
+            self.errors += 1
 
     def check_frontend_dependencies(self) -> None:
         self.header("Frontend Dependencies")
         if not (self.root / self.FRONTEND_DIR / "node_modules").exists():
-            self.info("Installing frontend packages …")
-            self.run(["npm", "install"], cwd=self.root / self.FRONTEND_DIR, check=True)
+            self.fail("Frontend node_modules missing — run: python3 setup.py")
+            self.errors += 1
         else:
             self.ok("Frontend node_modules found")
 
@@ -339,15 +347,11 @@ class Launcher:
 
         qdrant_url = self.configured_qdrant_url()
         if qdrant_url:
-            try:
-                collections_url = urljoin(qdrant_url.rstrip("/") + "/", "collections")
-                with urllib.request.urlopen(collections_url, timeout=3):
-                    pass
+            if self._qdrant_reachable(qdrant_url):
                 self.ok(f"Qdrant server reachable at {qdrant_url}")
-            except Exception:
+            else:
                 self.warn(
-                    f"Qdrant server not responding at {qdrant_url}; "
-                    "start it with `docker compose up -d qdrant` or switch back to indexing.qdrant_path"
+                    f"Qdrant not responding at {qdrant_url} — run: docker compose up -d qdrant"
                 )
                 self.warnings += 1
         else:
@@ -377,6 +381,14 @@ class Launcher:
         ]:
             (self.root / path).mkdir(parents=True, exist_ok=True)
         self.ok("Data directories ready")
+
+    def _qdrant_reachable(self, qdrant_url: str) -> bool:
+        try:
+            collections_url = urljoin(qdrant_url.rstrip("/") + "/", "collections")
+            with urllib.request.urlopen(collections_url, timeout=3):
+                return True
+        except Exception:
+            return False
 
     def check_ports(self) -> None:
         self.header("Port Check")
@@ -421,13 +433,11 @@ class Launcher:
         print(f"\n{Style.BOLD}══════════════════════════════════════════{Style.RESET}", flush=True)
         if self.errors:
             self.fail(f"Health check: {self.errors} error(s), {self.warnings} warning(s)")
-            print(f"{Style.RED}Cannot start — free the occupied ports or adjust start.py.{Style.RESET}", flush=True)
         elif self.warnings:
             self.warn(f"Health check: 0 errors, {self.warnings} warning(s)")
-            print(f"{Style.YELLOW}Starting with degraded optional functionality …{Style.RESET}", flush=True)
         else:
             self.ok("All checks passed")
-        print(f"{Style.BOLD}══════════════════════════════════════════{Style.RESET}\n", flush=True)
+        print(f"{Style.BOLD}══════════════════════════════════════════{Style.RESET}", flush=True)
 
     def launch_services(self) -> None:
         self.header("Launch")
