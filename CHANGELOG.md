@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## v1.8.4 - 2026-06-13
+
+### Changed
+- **Startup is now check-only**: `start.py` no longer auto-installs Python/npm dependencies or auto-starts Qdrant. It reports all issues and asks the user whether to proceed with degraded functionality or abort. Installation and service setup remain in `setup.py`.
+
+### Fixed
+- **Qdrant `[Errno 61] Connection refused` on indexing**: root cause was Qdrant not running after reboot. `start.py` now clearly reports this before launch and directs the user to run `docker compose up -d qdrant` or `python3 setup.py`.
+
+---
+
 ## v1.8.3 - 2026-06-12
 
 ### Added
